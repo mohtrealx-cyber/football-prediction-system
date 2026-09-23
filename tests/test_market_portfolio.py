@@ -12,6 +12,8 @@ class TestMarketPortfolio(unittest.TestCase):
             self.candidates.append(
                 {
                     "match_id": f"match_{index + 1:03d}",
+                    "home_team": f"Home Team {index + 1}",
+                    "away_team": f"Away Team {index + 1}",
                     "market": "home_win",
                     "model_probability": 0.70,
                     "odds": 1.80,
@@ -29,7 +31,7 @@ class TestMarketPortfolio(unittest.TestCase):
         )
 
         self.assertEqual(
-            len(portfolio["tickets"]),
+            len(portfolio),
             4,
         )
 
@@ -40,7 +42,7 @@ class TestMarketPortfolio(unittest.TestCase):
 
         ticket_names = [
             ticket["name"]
-            for ticket in portfolio["tickets"]
+            for ticket in portfolio
         ]
 
         self.assertIn("SAFE", ticket_names)
@@ -55,7 +57,7 @@ class TestMarketPortfolio(unittest.TestCase):
 
         stakes = {
             ticket["name"]: ticket["stake_percentage"]
-            for ticket in portfolio["tickets"]
+            for ticket in portfolio
         }
 
         self.assertEqual(stakes["SAFE"], 40.0)
@@ -68,7 +70,7 @@ class TestMarketPortfolio(unittest.TestCase):
             self.candidates,
         )
 
-        for ticket in portfolio["tickets"]:
+        for ticket in portfolio:
             self.assertGreaterEqual(
                 len(ticket["selections"]),
                 3,
@@ -79,7 +81,7 @@ class TestMarketPortfolio(unittest.TestCase):
             self.candidates,
         )
 
-        for ticket in portfolio["tickets"]:
+        for ticket in portfolio:
             self.assertLessEqual(
                 len(ticket["selections"]),
                 6,
@@ -92,7 +94,7 @@ class TestMarketPortfolio(unittest.TestCase):
 
         usage = {}
 
-        for ticket in portfolio["tickets"]:
+        for ticket in portfolio:
             for selection in ticket["selections"]:
                 match_id = selection.match_id
                 usage[match_id] = usage.get(match_id, 0) + 1
@@ -104,7 +106,7 @@ class TestMarketPortfolio(unittest.TestCase):
         portfolio = build_market_portfolio([])
 
         self.assertEqual(
-            portfolio["tickets"],
+            portfolio,
             [],
         )
 
