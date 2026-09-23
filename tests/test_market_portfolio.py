@@ -56,7 +56,7 @@ class TestMarketPortfolio(unittest.TestCase):
         )
 
         stakes = {
-            ticket.name: ticket.stake_percentage
+            ticket.name: ticket.stake_percent
             for ticket in portfolio
         }
 
