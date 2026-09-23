@@ -41,7 +41,7 @@ class TestMarketPortfolio(unittest.TestCase):
         )
 
         ticket_names = [
-            ticket["name"]
+            ticket.name
             for ticket in portfolio
         ]
 
@@ -56,7 +56,7 @@ class TestMarketPortfolio(unittest.TestCase):
         )
 
         stakes = {
-            ticket["name"]: ticket["stake_percentage"]
+            ticket.name: ticket.stake_percentage
             for ticket in portfolio
         }
 
@@ -72,7 +72,7 @@ class TestMarketPortfolio(unittest.TestCase):
 
         for ticket in portfolio:
             self.assertGreaterEqual(
-                len(ticket["selections"]),
+                len(ticket.selections),
                 3,
             )
 
@@ -83,7 +83,7 @@ class TestMarketPortfolio(unittest.TestCase):
 
         for ticket in portfolio:
             self.assertLessEqual(
-                len(ticket["selections"]),
+                len(ticket.selections),
                 6,
             )
 
@@ -95,7 +95,7 @@ class TestMarketPortfolio(unittest.TestCase):
         usage = {}
 
         for ticket in portfolio:
-            for selection in ticket["selections"]:
+            for selection in ticket.selections:
                 match_id = selection.match_id
                 usage[match_id] = usage.get(match_id, 0) + 1
 
