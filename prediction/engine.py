@@ -2,9 +2,12 @@ import math
 
 
 def _validate_expected_goals(value, name):
-    """Validate an expected-goals input."""
+    """Validate an expected-goals value."""
+
+    # The prediction engine treats every invalid expected-goals input
+    # as a ValueError, including non-numeric values.
     if not isinstance(value, (int, float)):
-        raise TypeError(f"{name} must be numeric")
+        raise ValueError(f"{name} must be numeric")
 
     if not math.isfinite(value):
         raise ValueError(f"{name} must be finite")
@@ -13,8 +16,17 @@ def _validate_expected_goals(value, name):
         raise ValueError(f"{name} must be non-negative")
 
 
+def _validate_max_goals(max_goals):
+    """Validate the maximum goals used by the Poisson calculation."""
+    if not isinstance(max_goals, int):
+        raise ValueError("max_goals must be an integer")
+
+    if max_goals <= 0:
+        raise ValueError("max_goals must be greater than zero")
+
+
 def _poisson_probability(expected_goals, goals):
-    """Return Poisson probability for an exact goals value."""
+    """Calculate the Poisson probability of a specific goals count."""
     return (
         math.exp(-expected_goals)
         * (expected_goals ** goals)
@@ -30,7 +42,7 @@ def predict_match(
     """
     Convert expected goals into football market probabilities.
 
-    Markets returned:
+    Returns:
         home_win
         draw
         away_win
@@ -38,27 +50,35 @@ def predict_match(
         under_2_5
         btts_yes
         btts_no
-
-    Expected goals are represented by the two input values.
     """
 
-    _validate_expected_goals(expected_home_goals, "expected_home_goals")
-    _validate_expected_goals(expected_away_goals, "expected_away_goals")
+    # Validate inputs first.
+    _validate_expected_goals(
+        expected_home_goals,
+        "expected_home_goals",
+    )
 
-    if not isinstance(max_goals, int):
-        raise TypeError("max_goals must be an integer")
+    _validate_expected_goals(
+        expected_away_goals,
+        "expected_away_goals",
+    )
 
-    if max_goals <= 0:
-        raise ValueError("max_goals must be greater than zero")
+    _validate_max_goals(max_goals)
 
-    # Build Poisson distributions for both teams.
+    # Create Poisson distributions for home and away goals.
     home_distribution = [
-        _poisson_probability(expected_home_goals, goals)
+        _poisson_probability(
+            expected_home_goals,
+            goals,
+        )
         for goals in range(max_goals + 1)
     ]
 
     away_distribution = [
-        _poisson_probability(expected_away_goals, goals)
+        _poisson_probability(
+            expected_away_goals,
+            goals,
+        )
         for goals in range(max_goals + 1)
     ]
 
@@ -67,41 +87,54 @@ def predict_match(
     draw = 0.0
     away_win = 0.0
 
-    # Over 2.5 goals probability.
+    # Goals market.
     over_2_5 = 0.0
 
-    # BTTS probability.
+    # Both teams to score.
     btts_yes = 0.0
 
+    # Combine the two Poisson distributions.
     for home_goals in range(max_goals + 1):
         for away_goals in range(max_goals + 1):
+
             probability = (
                 home_distribution[home_goals]
                 * away_distribution[away_goals]
             )
 
+            # 1X2
             if home_goals > away_goals:
                 home_win += probability
+
             elif home_goals == away_goals:
                 draw += probability
+
             else:
                 away_win += probability
 
+            # Over 2.5
             if home_goals + away_goals > 2:
                 over_2_5 += probability
 
+            # BTTS Yes
             if home_goals >= 1 and away_goals >= 1:
                 btts_yes += probability
 
-    # Complementary markets.
+    # Complementary probabilities.
     under_2_5 = 1.0 - over_2_5
     btts_no = 1.0 - btts_yes
 
-    # Because the Poisson distributions are truncated at max_goals,
-    # a tiny amount of probability can fall outside the calculated range.
-    # Normalize Home/Draw/Away so the three mutually-exclusive outcomes
-    # sum to exactly 1.0.
-    match_result_total = home_win + draw + away_win
+    # The Poisson calculation is truncated at max_goals.
+    # Normalize the 1X2 probabilities so:
+    #
+    # home_win + draw + away_win = 1.0
+    #
+    # This removes the tiny probability loss caused by truncation.
+    match_result_total = (
+        home_win
+        + draw
+        + away_win
+    )
 
     if match_result_total > 0:
         home_win /= match_result_total
