@@ -4,18 +4,28 @@ import math
 def _validate_expected_goals(value, name):
     """Validate an expected-goals value."""
 
+    # Boolean values are not valid expected-goals values.
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be numeric")
+
+    # Expected goals must be numeric.
     if not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
 
+    # Reject NaN and infinity.
     if not math.isfinite(value):
         raise ValueError(f"{name} must be finite")
 
+    # Expected goals must be greater than zero.
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero")
 
 
 def _validate_max_goals(max_goals):
     """Validate the maximum goals used by the Poisson calculation."""
+
+    if isinstance(max_goals, bool):
+        raise ValueError("max_goals must be an integer")
 
     if not isinstance(max_goals, int):
         raise ValueError("max_goals must be an integer")
@@ -88,13 +98,13 @@ def predict_match(
     draw = 0.0
     away_win = 0.0
 
-    # Over/Under 2.5 goals.
+    # Goals market.
     over_2_5 = 0.0
 
     # Both Teams To Score.
     btts_yes = 0.0
 
-    # Combine the two Poisson distributions.
+    # Combine both Poisson distributions.
     for home_goals in range(max_goals + 1):
         for away_goals in range(max_goals + 1):
 
@@ -117,19 +127,16 @@ def predict_match(
             if home_goals + away_goals > 2:
                 over_2_5 += probability
 
-            # Both teams score.
+            # BTTS Yes.
             if home_goals >= 1 and away_goals >= 1:
                 btts_yes += probability
 
-    # Complementary probabilities.
+    # Complementary markets.
     under_2_5 = 1.0 - over_2_5
     btts_no = 1.0 - btts_yes
 
-    # Because the Poisson distribution is truncated at
-    # max_goals, a tiny amount of probability can be lost.
-    #
-    # Normalize the 1X2 probabilities so:
-    # home_win + draw + away_win = 1.0
+    # Normalize Home/Draw/Away because the Poisson distribution
+    # is truncated at max_goals.
     match_result_total = (
         home_win
         + draw
