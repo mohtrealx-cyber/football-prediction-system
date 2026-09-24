@@ -1,42 +1,8 @@
 import math
 
 
-def _validate_expected_goals(value, name):
-    """Validate an expected-goals value."""
-
-    # Boolean values are not valid expected-goals values.
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be numeric")
-
-    # Expected goals must be numeric.
-    if not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be numeric")
-
-    # Reject NaN and infinity.
-    if not math.isfinite(value):
-        raise ValueError(f"{name} must be finite")
-
-    # Expected goals must be greater than zero.
-    if value <= 0:
-        raise ValueError(f"{name} must be greater than zero")
-
-
-def _validate_max_goals(max_goals):
-    """Validate the maximum goals used by the Poisson calculation."""
-
-    if isinstance(max_goals, bool):
-        raise ValueError("max_goals must be an integer")
-
-    if not isinstance(max_goals, int):
-        raise ValueError("max_goals must be an integer")
-
-    if max_goals <= 0:
-        raise ValueError("max_goals must be greater than zero")
-
-
 def _poisson_probability(expected_goals, goals):
-    """Calculate the Poisson probability of a specific goals count."""
-
+    """Calculate the Poisson probability for an exact goals value."""
     return (
         math.exp(-expected_goals)
         * (expected_goals ** goals)
@@ -62,21 +28,73 @@ def predict_match(
         btts_no
     """
 
-    # Validate expected goals.
-    _validate_expected_goals(
-        expected_home_goals,
-        "expected_home_goals",
-    )
+    # ============================================================
+    # VALIDATE EXPECTED GOALS
+    # ============================================================
 
-    _validate_expected_goals(
-        expected_away_goals,
-        "expected_away_goals",
-    )
+    if isinstance(expected_home_goals, bool):
+        raise ValueError(
+            "expected_home_goals must be a positive number"
+        )
 
-    # Validate maximum goals.
-    _validate_max_goals(max_goals)
+    if isinstance(expected_away_goals, bool):
+        raise ValueError(
+            "expected_away_goals must be a positive number"
+        )
 
-    # Create Poisson distributions for home and away goals.
+    if not isinstance(expected_home_goals, (int, float)):
+        raise ValueError(
+            "expected_home_goals must be a positive number"
+        )
+
+    if not isinstance(expected_away_goals, (int, float)):
+        raise ValueError(
+            "expected_away_goals must be a positive number"
+        )
+
+    if not math.isfinite(expected_home_goals):
+        raise ValueError(
+            "expected_home_goals must be finite"
+        )
+
+    if not math.isfinite(expected_away_goals):
+        raise ValueError(
+            "expected_away_goals must be finite"
+        )
+
+    if expected_home_goals <= 0:
+        raise ValueError(
+            "expected_home_goals must be greater than zero"
+        )
+
+    if expected_away_goals <= 0:
+        raise ValueError(
+            "expected_away_goals must be greater than zero"
+        )
+
+    # ============================================================
+    # VALIDATE MAX GOALS
+    # ============================================================
+
+    if isinstance(max_goals, bool):
+        raise ValueError(
+            "max_goals must be a positive integer"
+        )
+
+    if not isinstance(max_goals, int):
+        raise ValueError(
+            "max_goals must be a positive integer"
+        )
+
+    if max_goals <= 0:
+        raise ValueError(
+            "max_goals must be greater than zero"
+        )
+
+    # ============================================================
+    # POISSON DISTRIBUTIONS
+    # ============================================================
+
     home_distribution = [
         _poisson_probability(
             expected_home_goals,
@@ -93,19 +111,23 @@ def predict_match(
         for goals in range(max_goals + 1)
     ]
 
-    # Match result probabilities.
+    # ============================================================
+    # INITIAL PROBABILITIES
+    # ============================================================
+
     home_win = 0.0
     draw = 0.0
     away_win = 0.0
 
-    # Goals market.
     over_2_5 = 0.0
-
-    # Both Teams To Score.
     btts_yes = 0.0
 
-    # Combine both Poisson distributions.
+    # ============================================================
+    # SCORELINE MATRIX
+    # ============================================================
+
     for home_goals in range(max_goals + 1):
+
         for away_goals in range(max_goals + 1):
 
             probability = (
@@ -113,7 +135,10 @@ def predict_match(
                 * away_distribution[away_goals]
             )
 
-            # Home / Draw / Away.
+            # ----------------------------------------------------
+            # 1X2
+            # ----------------------------------------------------
+
             if home_goals > away_goals:
                 home_win += probability
 
@@ -123,30 +148,71 @@ def predict_match(
             else:
                 away_win += probability
 
-            # Over 2.5 goals.
+            # ----------------------------------------------------
+            # OVER 2.5
+            # ----------------------------------------------------
+
             if home_goals + away_goals > 2:
                 over_2_5 += probability
 
-            # BTTS Yes.
+            # ----------------------------------------------------
+            # BTTS
+            # ----------------------------------------------------
+
             if home_goals >= 1 and away_goals >= 1:
                 btts_yes += probability
 
-    # Complementary markets.
+    # ============================================================
+    # COMPLEMENTARY MARKETS
+    # ============================================================
+
     under_2_5 = 1.0 - over_2_5
     btts_no = 1.0 - btts_yes
 
-    # Normalize Home/Draw/Away because the Poisson distribution
-    # is truncated at max_goals.
+    # ============================================================
+    # NORMALIZE 1X2
+    # ============================================================
+    #
+    # The score matrix is intentionally limited to max_goals.
+    # A very small amount of probability can therefore exist
+    # outside the calculated range.
+    #
+    # Normalize the three mutually-exclusive result probabilities
+    # so that:
+    #
+    # HOME + DRAW + AWAY = 1.0
+    #
+    # ============================================================
+
     match_result_total = (
         home_win
         + draw
         + away_win
     )
 
-    if match_result_total > 0:
-        home_win /= match_result_total
-        draw /= match_result_total
-        away_win /= match_result_total
+    if match_result_total <= 0:
+        raise ValueError(
+            "Unable to calculate match-result probabilities"
+        )
+
+    home_win = (
+        home_win
+        / match_result_total
+    )
+
+    draw = (
+        draw
+        / match_result_total
+    )
+
+    away_win = (
+        away_win
+        / match_result_total
+    )
+
+    # ============================================================
+    # FINAL RESULT
+    # ============================================================
 
     return {
         "home_win": home_win,
