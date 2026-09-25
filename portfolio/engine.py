@@ -751,3 +751,11 @@ def build_portfolio(
     Additional compatibility wrapper for older callers.
     """
     return build_market_portfolio(candidates)
+def build_smart_portfolio(candidates: List[dict]) -> List[Ticket]:
+    """
+    Backward-compatible public entry point.
+
+    Older modules and tests import build_smart_portfolio().
+    The current implementation lives in build_market_portfolio().
+    """
+    return build_market_portfolio(candidates)
