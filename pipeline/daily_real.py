@@ -129,9 +129,9 @@ def build_daily_real_candidates(
             continue
 
         features = build_match_features(
-            fixture,
-            prior_history,
-        )
+    prior_history,
+    fixture,
+)
 
         predictions = predict_match_from_features(
             features
