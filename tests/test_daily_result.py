@@ -92,7 +92,7 @@ class DailyResultTests(unittest.TestCase):
         )
 
         expected_portfolio = {
-            "portfolio": "value",
+            "result": "daily portfolio",
         }
 
         with patch(
@@ -150,9 +150,19 @@ class DailyResultTests(unittest.TestCase):
             0,
         )
 
-        self.assertIs(
-            result["portfolio"],
-            expected_portfolio,
+        self.assertEqual(
+            result["portfolio"]["status"],
+            "NO_BET",
+        )
+
+        self.assertEqual(
+            result["portfolio"]["reason"],
+            "insufficient qualifying selections",
+        )
+
+        self.assertEqual(
+            result["portfolio"]["tickets"],
+            [],
         )
 
     def test_filter_is_called_with_original_fixtures(self):
