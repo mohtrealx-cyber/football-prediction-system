@@ -5,6 +5,7 @@ from typing import Any
 from data.historical_models import HistoricalMatch
 from data.models import Match
 from pipeline.daily_real import build_daily_real_candidates
+from portfolio.daily_validator import validate_daily_portfolio
 from portfolio.market_portfolio import build_market_portfolio
 
 
@@ -12,12 +13,6 @@ def build_daily_real_portfolio(
     fixtures: list[Match],
     history: list[HistoricalMatch],
 ) -> Any:
-    """
-    Build the daily real-data candidate set and pass it into
-    the existing market portfolio builder.
-
-    The function intentionally does not duplicate portfolio logic.
-    """
     if not isinstance(fixtures, list):
         raise TypeError("fixtures must be a list")
 
@@ -29,6 +24,12 @@ def build_daily_real_portfolio(
         history,
     )
 
-    return build_market_portfolio(
+    portfolio = build_market_portfolio(
         candidates,
     )
+
+    validate_daily_portfolio(
+        portfolio
+    )
+
+    return portfolio
