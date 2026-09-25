@@ -1,6 +1,6 @@
 import copy
 import unittest
-from dataclasses import replace
+from types import SimpleNamespace
 
 from portfolio.market_portfolio import build_market_portfolio
 from portfolio.daily_validator import validate_daily_portfolio
@@ -243,8 +243,8 @@ class DailyTicketValidationTests(unittest.TestCase):
             portfolio[0].selections[0]
         )
 
-        unqualified_selection = replace(
-            original_selection,
+        unqualified_selection = SimpleNamespace(
+            match_id=original_selection.match_id,
             qualified=False,
         )
 
