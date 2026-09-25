@@ -10,7 +10,6 @@ MAX_MATCH_USAGE = 2
 DIVERSITY_PENALTY = 6.0
 
 
-# Selection labels for the newer normalized markets.
 MARKET_SELECTIONS = {
     "home_win": "HOME",
     "draw": "DRAW",
@@ -63,16 +62,14 @@ def _candidate_selection_name(
     candidate: dict,
 ) -> str:
     """
-    Return the selection name used for sorting.
+    Return the selection name used for deterministic sorting.
 
     Newer candidates normally contain an explicit
     "selection" field.
 
     Older candidates may omit it. In that case:
-    - known normalized markets get their standard label
+    - normalized markets use their standard selection label
     - legacy markets such as 1X use the market name itself
-
-    This keeps the older portfolio interface compatible.
     """
 
     selection_value = candidate.get(
@@ -103,18 +100,12 @@ def _resolve_candidate_selection(
     candidate: dict,
 ) -> str:
     """
-    Resolve the Selection.selection field.
+    Resolve the selection label.
 
     Priority:
     1. Explicit candidate["selection"]
-    2. Known normalized-market mapping
-    3. Legacy market name itself
-
-    Examples:
-        home_win -> HOME
-        draw     -> DRAW
-        1X       -> 1X
-        X2       -> X2
+    2. Known normalized market mapping
+    3. Legacy/custom market name itself
     """
 
     selection_value = candidate.get(
@@ -137,7 +128,8 @@ def _resolve_candidate_selection(
     if normalized_selection is not None:
         return normalized_selection
 
-    # Preserve legacy/custom markets instead of rejecting them.
+    # Preserve legacy/custom markets such as:
+    # 1X, X2, 12, etc.
     return market
 
 
@@ -145,16 +137,18 @@ def _resolve_candidate_odds(
     candidate: dict,
 ) -> float:
     """
-    Resolve the numeric odds for a candidate.
+    Resolve numeric odds for the selected market.
 
-    New daily-real candidates:
+    Supported formats:
+
+    New daily-real candidate:
         odds = {
             "home_win": 1.80,
             ...
         }
         selected_odds = 1.80
 
-    Older candidates:
+    Older candidate:
         odds = 1.80
     """
 
@@ -202,8 +196,12 @@ def _candidate_to_selection(
     """
     Convert a candidate dictionary into a Selection object.
 
-    Supports both the legacy portfolio candidate format
-    and the newer daily-real candidate format.
+    Important:
+    Candidate objects contain home_team and away_team,
+    but the project's Selection constructor does not.
+
+    Therefore those fields are validated here but are NOT
+    passed to Selection().
     """
 
     required_fields = (
@@ -240,8 +238,6 @@ def _candidate_to_selection(
 
     return Selection(
         match_id=candidate["match_id"],
-        home_team=candidate["home_team"],
-        away_team=candidate["away_team"],
         market=candidate["market"],
         selection=selection_value,
         odds=odds_value,
@@ -391,7 +387,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # Never repeat a match inside the same ticket.
+        # Never repeat the same match inside one ticket.
         if match_id in used_match_ids:
             continue
 
@@ -412,7 +408,8 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force a ticket with fewer than 3 selections.
+    # Never force weak selections.
+    # A ticket needs at least three selections.
     if len(selections) < 3:
         return []
 
