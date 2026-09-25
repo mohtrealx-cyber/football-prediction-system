@@ -1,23 +1,17 @@
-from portfolio.engine import build_smart_portfolio
+from __future__ import annotations
+
+from typing import List
+
+from tickets.builder import Ticket
+from portfolio.engine import build_market_portfolio as _build_market_portfolio
 
 
 def build_market_portfolio(
-    candidates,
-):
+    candidates: List[dict],
+) -> List[Ticket]:
     """
-    Build the four-ticket portfolio from market candidates.
+    Public market-portfolio entry point.
 
-    The existing portfolio engine handles:
-    - SAFE — 40%
-    - BALANCED — 30%
-    - AGGRESSIVE — 20%
-    - VALUE — 10%
-    - minimum ticket size
-    - maximum ticket size
-    - match reuse limits
-    - ticket diversity
+    Delegates to the modern market-aware implementation in portfolio.engine.
     """
-    if not isinstance(candidates, list):
-        raise TypeError("candidates must be a list")
-
-    return build_smart_portfolio(candidates)
+    return _build_market_portfolio(candidates)
