@@ -101,8 +101,18 @@ class PerformanceReportStreaksTests(unittest.TestCase):
         result = build_performance_report(self.results)
 
         self.assertEqual(
-            len(result["markets"]["home_win"]),
+            result["markets"]["home_win"]["total_tickets"],
             3,
+        )
+
+        self.assertEqual(
+            result["markets"]["home_win"]["wins"],
+            2,
+        )
+
+        self.assertEqual(
+            result["markets"]["home_win"]["losses"],
+            1,
         )
 
     def test_empty_markets_do_not_break_streaks(self):
