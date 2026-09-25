@@ -10,6 +10,7 @@ MAX_MATCH_USAGE = 2
 DIVERSITY_PENALTY = 6.0
 
 
+# Selection labels for the newer normalized markets.
 MARKET_SELECTIONS = {
     "home_win": "HOME",
     "draw": "DRAW",
@@ -58,18 +59,151 @@ def _validate_candidates(
         )
 
 
+def _candidate_selection_name(
+    candidate: dict,
+) -> str:
+    """
+    Return the selection name used for sorting.
+
+    Newer candidates normally contain an explicit
+    "selection" field.
+
+    Older candidates may omit it. In that case:
+    - known normalized markets get their standard label
+    - legacy markets such as 1X use the market name itself
+
+    This keeps the older portfolio interface compatible.
+    """
+
+    selection_value = candidate.get(
+        "selection"
+    )
+
+    if selection_value is not None:
+        return str(
+            selection_value
+        )
+
+    market = str(
+        candidate.get(
+            "market",
+            "",
+        )
+    )
+
+    return str(
+        MARKET_SELECTIONS.get(
+            market,
+            market,
+        )
+    )
+
+
+def _resolve_candidate_selection(
+    candidate: dict,
+) -> str:
+    """
+    Resolve the Selection.selection field.
+
+    Priority:
+    1. Explicit candidate["selection"]
+    2. Known normalized-market mapping
+    3. Legacy market name itself
+
+    Examples:
+        home_win -> HOME
+        draw     -> DRAW
+        1X       -> 1X
+        X2       -> X2
+    """
+
+    selection_value = candidate.get(
+        "selection"
+    )
+
+    if selection_value is not None:
+        return str(
+            selection_value
+        )
+
+    market = str(
+        candidate["market"]
+    )
+
+    normalized_selection = MARKET_SELECTIONS.get(
+        market
+    )
+
+    if normalized_selection is not None:
+        return normalized_selection
+
+    # Preserve legacy/custom markets instead of rejecting them.
+    return market
+
+
+def _resolve_candidate_odds(
+    candidate: dict,
+) -> float:
+    """
+    Resolve the numeric odds for a candidate.
+
+    New daily-real candidates:
+        odds = {
+            "home_win": 1.80,
+            ...
+        }
+        selected_odds = 1.80
+
+    Older candidates:
+        odds = 1.80
+    """
+
+    odds_value = candidate.get(
+        "selected_odds"
+    )
+
+    if odds_value is None:
+        odds_value = candidate.get(
+            "odds"
+        )
+
+    if isinstance(
+        odds_value,
+        dict,
+    ):
+        market = candidate["market"]
+
+        if market not in odds_value:
+            raise ValueError(
+                "Candidate odds are missing market: "
+                f"{market}"
+            )
+
+        odds_value = odds_value[
+            market
+        ]
+
+    if not isinstance(
+        odds_value,
+        (int, float),
+    ):
+        raise TypeError(
+            "Candidate selected odds must be numeric"
+        )
+
+    return float(
+        odds_value
+    )
+
+
 def _candidate_to_selection(
     candidate: dict,
 ) -> Selection:
     """
     Convert a candidate dictionary into a Selection object.
 
-    Supports both:
-    1. Older candidates where odds is numeric and selection may be absent.
-    2. Daily-real candidates where:
-       - odds = complete market odds dictionary
-       - selected_odds = numeric price for the selected market
-       - selection = explicit selection label
+    Supports both the legacy portfolio candidate format
+    and the newer daily-real candidate format.
     """
 
     required_fields = (
@@ -92,64 +226,25 @@ def _candidate_to_selection(
             f"Candidate is missing fields: {missing_fields}"
         )
 
-    market = candidate["market"]
-
-    # New daily-real candidates already provide "selection".
-    # Older portfolio candidates may not, so derive it from
-    # the market name.
-    selection_value = candidate.get(
-        "selection"
+    selection_value = (
+        _resolve_candidate_selection(
+            candidate
+        )
     )
 
-    if selection_value is None:
-        selection_value = MARKET_SELECTIONS.get(
-            market
+    odds_value = (
+        _resolve_candidate_odds(
+            candidate
         )
-
-    if selection_value is None:
-        raise ValueError(
-            f"Unknown market and no selection provided: {market}"
-        )
-
-    # Prefer the explicitly selected market price.
-    odds_value = candidate.get(
-        "selected_odds"
     )
-
-    if odds_value is None:
-        odds_value = candidate.get(
-            "odds"
-        )
-
-    # Daily-real candidates preserve all market odds inside
-    # the "odds" dictionary.
-    if isinstance(
-        odds_value,
-        dict,
-    ):
-        if market not in odds_value:
-            raise ValueError(
-                "Candidate odds are missing market: "
-                f"{market}"
-            )
-
-        odds_value = odds_value[market]
-
-    if not isinstance(
-        odds_value,
-        (int, float),
-    ):
-        raise TypeError(
-            "Candidate selected odds must be numeric"
-        )
 
     return Selection(
         match_id=candidate["match_id"],
         home_team=candidate["home_team"],
         away_team=candidate["away_team"],
-        market=market,
+        market=candidate["market"],
         selection=selection_value,
-        odds=float(odds_value),
+        odds=odds_value,
         score=float(
             candidate["score"]
         ),
@@ -173,7 +268,9 @@ def _candidate_metric(
             f"candidate {metric} must be numeric"
         )
 
-    return float(value)
+    return float(
+        value
+    )
 
 
 def _selection_match_id(
@@ -181,38 +278,6 @@ def _selection_match_id(
 ) -> str:
     return str(
         selection.match_id
-    )
-
-
-def _candidate_selection_name(
-    candidate: dict,
-) -> str:
-    """
-    Return the candidate selection name.
-
-    Uses explicit "selection" when available.
-    Otherwise derives it from the market.
-    """
-
-    selection_value = candidate.get(
-        "selection"
-    )
-
-    if selection_value is not None:
-        return str(
-            selection_value
-        )
-
-    market = candidate.get(
-        "market",
-        "",
-    )
-
-    return str(
-        MARKET_SELECTIONS.get(
-            market,
-            "",
-        )
     )
 
 
@@ -326,7 +391,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # No duplicate match inside one ticket.
+        # Never repeat a match inside the same ticket.
         if match_id in used_match_ids:
             continue
 
@@ -347,13 +412,11 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force weak selections.
-    # A ticket requires at least three matches.
+    # Never force a ticket with fewer than 3 selections.
     if len(selections) < 3:
         return []
 
-    # Prefer the configured ticket size when enough
-    # independent matches are available.
+    # Prefer the configured ticket size.
     if len(selections) > preferred_count:
         selections = selections[
             :preferred_count
@@ -449,7 +512,7 @@ def build_smart_portfolio(
         )
 
         if len(selections) < 3:
-            # No forced ticket.
+            # Do not force a ticket.
             continue
 
         ticket = _build_ticket(
