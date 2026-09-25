@@ -1,5 +1,6 @@
 import math
 
+from data.models import Match
 from data.features import build_match_features
 from prediction.feature_prediction import predict_match_from_features
 from backtesting.engine import backtest_selection
@@ -18,6 +19,26 @@ def _validate_stake(stake):
         raise ValueError("stake must be greater than zero")
 
 
+def _historical_to_match(historical_match: HistoricalMatch) -> Match:
+    """
+    Convert a HistoricalMatch into the Match structure expected
+    by the feature-engineering layer.
+
+    The original HistoricalMatch remains the authoritative object
+    for historical result settlement.
+    """
+
+    return Match(
+        match_id=historical_match.match_id,
+        home_team=historical_match.home_team,
+        away_team=historical_match.away_team,
+        league=historical_match.league,
+        kickoff=historical_match.kickoff,
+        status="finished",
+        odds=dict(historical_match.odds),
+    )
+
+
 def rolling_backtest(
     matches: list,
     market: str,
@@ -26,8 +47,8 @@ def rolling_backtest(
     """
     Perform a chronological historical backtest.
 
-    Each target match is predicted using only matches that
-    occurred before that target match.
+    Every target match is predicted using only historical matches
+    that occurred strictly before the target kickoff.
     """
 
     if not isinstance(matches, list):
@@ -61,13 +82,14 @@ def rolling_backtest(
             if historical_match.kickoff < target_match.kickoff
         ]
 
-        # There is no information available to make a
-        # meaningful historical prediction for the first match.
+        # No prior information means no historical prediction.
         if not previous_matches:
             continue
 
+        feature_target = _historical_to_match(target_match)
+
         features = build_match_features(
-            target_match=target_match,
+            target_match=feature_target,
             historical_matches=previous_matches,
         )
 
@@ -79,8 +101,7 @@ def rolling_backtest(
 
         odds = target_match.odds.get(market)
 
-        # A historical selection cannot be backtested without
-        # usable odds for the requested market.
+        # Skip markets where historical odds are unavailable.
         if odds is None:
             continue
 
