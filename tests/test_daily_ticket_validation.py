@@ -19,11 +19,7 @@ def make_candidate(
         "selection": "HOME",
         "qualified": qualified,
         "model_probability": 0.70,
-        "odds": {
-            "home_win": 1.80,
-            "draw": 3.50,
-            "away_win": 4.50,
-        },
+        "odds": 1.80,
         "selected_odds": 1.80,
         "implied_probability": 1 / 1.80,
         "expected_value": 0.26,
