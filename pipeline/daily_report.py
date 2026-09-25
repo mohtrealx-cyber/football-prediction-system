@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from pipeline.daily_report_validator import validate_daily_report
 from pipeline.daily_result import build_daily_result
 
 
@@ -51,7 +52,11 @@ def build_daily_report(
         as_of,
     )
 
-    return {
+    report = {
         "report_type": REPORT_TYPE,
         **daily_result,
     }
+
+    validate_daily_report(report)
+
+    return report
