@@ -14,10 +14,14 @@ def build_daily_real_portfolio(
     history: list[HistoricalMatch],
 ) -> Any:
     if not isinstance(fixtures, list):
-        raise TypeError("fixtures must be a list")
+        raise TypeError(
+            "fixtures must be a list"
+        )
 
     if not isinstance(history, list):
-        raise TypeError("history must be a list")
+        raise TypeError(
+            "history must be a list"
+        )
 
     candidates = build_daily_real_candidates(
         fixtures,
@@ -27,6 +31,12 @@ def build_daily_real_portfolio(
     portfolio = build_market_portfolio(
         candidates,
     )
+
+    # An empty portfolio is an intentional no-bet state.
+    # It must reach daily_result.py so it can be converted
+    # into the explicit NO_BET result.
+    if portfolio == []:
+        return portfolio
 
     validate_daily_portfolio(
         portfolio
