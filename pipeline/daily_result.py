@@ -40,17 +40,18 @@ def build_daily_result(
     as_of: datetime,
 ) -> dict:
     """
-    Build the daily pipeline result with execution metadata.
+    Build the daily pipeline result with execution metadata
+    and an explicit top-level execution status.
 
-    An empty portfolio is converted into an explicit NO_BET
-    result rather than being treated as a ticket or selection.
+    Status values:
 
-    The result contains:
+        READY
+            A non-empty portfolio was produced.
 
-        as_of
-        fixtures_received
-        upcoming_fixtures
-        portfolio
+        NO_BET
+            No qualifying portfolio was produced.
+
+    The portfolio itself is preserved unchanged when non-empty.
     """
     if not isinstance(fixtures, list):
         raise TypeError(
@@ -77,8 +78,12 @@ def build_daily_result(
 
     if portfolio == []:
         portfolio = _build_no_bet_result()
+        status = "NO_BET"
+    else:
+        status = "READY"
 
     return {
+        "status": status,
         "as_of": as_of,
         "fixtures_received": len(fixtures),
         "upcoming_fixtures": len(upcoming),
