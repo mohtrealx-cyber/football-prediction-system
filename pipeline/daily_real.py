@@ -26,7 +26,7 @@ MARKET_SELECTIONS = {
 
 
 def _validate_fixture(fixture: Any) -> None:
-    """Validate one scheduled fixture."""
+    """Validate one fixture."""
     if not isinstance(fixture, Match):
         raise TypeError("each fixture must be a Match")
 
@@ -44,10 +44,10 @@ def _calculate_score(
     value_edge: float,
 ) -> float:
     """
-    Calculate the candidate score.
+    Calculate candidate score.
 
-    70% comes from model probability.
-    30% comes from positive value edge, capped at 20 percentage points.
+    70% = model probability.
+    30% = positive value edge, capped at 20 percentage points.
     """
     capped_edge = min(
         max(value_edge, 0.0),
@@ -67,13 +67,13 @@ def _build_candidate(
     fixture: Match,
     market: str,
     model_probability: float,
-    odds: float,
+    selected_odds: float,
 ) -> dict[str, Any]:
-    """Build one scored market candidate."""
-    implied_probability = 1.0 / odds
+    """Build one market candidate while preserving all fixture odds."""
+    implied_probability = 1.0 / selected_odds
 
     expected_value = (
-        model_probability * odds
+        model_probability * selected_odds
     ) - 1.0
 
     value_edge = (
@@ -93,8 +93,14 @@ def _build_candidate(
         "kickoff": fixture.kickoff,
         "market": market,
         "selection": MARKET_SELECTIONS[market],
+
+        # Preserve the complete odds dictionary from the fixture.
+        "odds": dict(fixture.odds),
+
+        # Numeric odds for the specific selected market.
+        "selected_odds": selected_odds,
+
         "model_probability": model_probability,
-        "odds": odds,
         "implied_probability": implied_probability,
         "expected_value": expected_value,
         "value_edge": value_edge,
@@ -108,8 +114,14 @@ def build_daily_real_candidates(
     history: list[HistoricalMatch],
 ) -> list[dict[str, Any]]:
     """
-    Build market candidates from scheduled fixtures using only
-    historical matches that occurred before each fixture kickoff.
+    Build real daily market candidates.
+
+    Only scheduled fixtures are processed.
+
+    Only historical matches occurring strictly before each
+    fixture kickoff are used for feature generation.
+
+    The input fixture list and its odds dictionaries are not modified.
     """
     if not isinstance(fixtures, list):
         raise TypeError("fixtures must be a list")
@@ -128,11 +140,11 @@ def build_daily_real_candidates(
     supported_markets = get_supported_markets()
 
     for fixture in fixtures:
-        # Only scheduled fixtures belong in the daily candidate pipeline.
+        # Process scheduled fixtures only.
         if fixture.status != "scheduled":
             continue
 
-        # Never use historical information from the future.
+        # Use only historical matches before kickoff.
         prior_history = sorted(
             (
                 historical_match
@@ -142,14 +154,14 @@ def build_daily_real_candidates(
             key=lambda historical_match: historical_match.kickoff,
         )
 
-        # Without any prior history, there is not enough information
-        # for the feature model.
+        # No prior history means there is not enough information
+        # for feature generation.
         if not prior_history:
             continue
 
         # IMPORTANT:
         # build_match_features expects historical_matches FIRST,
-        # then the target fixture.
+        # followed by the target fixture.
         features = build_match_features(
             prior_history,
             fixture,
@@ -160,30 +172,35 @@ def build_daily_real_candidates(
         )
 
         for market in supported_markets:
-            odds = fixture.odds.get(market)
+            selected_odds = fixture.odds.get(market)
 
-            # Missing market odds are skipped.
-            if odds is None:
+            # No odds for this market.
+            if selected_odds is None:
                 continue
 
-            # Reject invalid odds values.
-            if not isinstance(odds, (int, float)):
+            # Odds must be numeric.
+            if not isinstance(
+                selected_odds,
+                (int, float),
+            ):
                 continue
 
-            odds = float(odds)
+            selected_odds = float(selected_odds)
 
-            if not math.isfinite(odds):
+            # Odds must be finite and greater than 1.
+            if not math.isfinite(selected_odds):
                 continue
 
-            if odds <= 1.0:
+            if selected_odds <= 1.0:
                 continue
 
             model_probability = predictions.get(market)
 
-            # Missing model probabilities are skipped.
+            # No prediction for this market.
             if model_probability is None:
                 continue
 
+            # Probability must be numeric.
             if not isinstance(
                 model_probability,
                 (int, float),
@@ -192,7 +209,7 @@ def build_daily_real_candidates(
 
             model_probability = float(model_probability)
 
-            # Reject invalid model probabilities.
+            # Probability must be finite and between 0 and 1.
             if not math.isfinite(model_probability):
                 continue
 
@@ -203,13 +220,13 @@ def build_daily_real_candidates(
                 fixture=fixture,
                 market=market,
                 model_probability=model_probability,
-                odds=odds,
+                selected_odds=selected_odds,
             )
 
             candidates.append(candidate)
 
     # Highest score first.
-    # Deterministic secondary ordering keeps test runs reproducible.
+    # Secondary keys make ordering deterministic.
     candidates.sort(
         key=lambda item: (
             -float(item["score"]),
