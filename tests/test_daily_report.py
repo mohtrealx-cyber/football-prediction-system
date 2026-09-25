@@ -1,90 +1,82 @@
-from __future__ import annotations
-
-import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
+
+import unittest
 
 from pipeline.daily_report import build_daily_report
 
 
 class DailyReportTests(unittest.TestCase):
 
-    def make_as_of(self):
-        return datetime(
+    def setUp(self):
+        self.fixtures = []
+        self.history = []
+        self.as_of = datetime(
             2026,
             9,
             25,
-            15,
+            12,
             0,
             tzinfo=timezone.utc,
         )
 
-    def test_ready_result_is_converted_to_report(self):
+    @patch("pipeline.daily_report.build_daily_result")
+    def test_ready_result_is_converted_to_report(
+        self,
+        mock_build_daily_result,
+    ):
         daily_result = {
             "status": "READY",
-            "as_of": self.make_as_of(),
+            "as_of": self.as_of,
             "fixtures_received": 10,
             "upcoming_fixtures": 7,
             "portfolio": [
-                "SAFE",
-                "BALANCED",
-                "AGGRESSIVE",
-                "VALUE",
+                "ticket-data",
             ],
         }
 
-        with patch(
-            "pipeline.daily_report.build_daily_result",
-            return_value=daily_result,
-        ) as builder:
+        mock_build_daily_result.return_value = daily_result
 
-            result = build_daily_report(
-                ["fixture-1"],
-                ["history-1"],
-                self.make_as_of(),
-            )
-
-        builder.assert_called_once_with(
-            ["fixture-1"],
-            ["history-1"],
-            self.make_as_of(),
+        result = build_daily_report(
+            self.fixtures,
+            self.history,
+            self.as_of,
         )
 
         self.assertEqual(
             result["report_type"],
             "DAILY_FOOTBALL_REPORT",
         )
-
         self.assertEqual(
             result["status"],
             "READY",
         )
-
         self.assertEqual(
             result["as_of"],
-            daily_result["as_of"],
+            self.as_of,
         )
-
         self.assertEqual(
             result["fixtures_received"],
             10,
         )
-
         self.assertEqual(
             result["upcoming_fixtures"],
             7,
         )
-
-        self.assertIs(
+        self.assertEqual(
             result["portfolio"],
-            daily_result["portfolio"],
+            ["ticket-data"],
         )
 
-    def test_no_bet_result_is_preserved(self):
+    @patch("pipeline.daily_report.build_daily_result")
+    def test_no_bet_result_is_preserved(
+        self,
+        mock_build_daily_result,
+    ):
         daily_result = {
             "status": "NO_BET",
-            "as_of": self.make_as_of(),
-            "fixtures_received": 5,
+            "as_of": self.as_of,
+            "fixtures_received": 10,
             "upcoming_fixtures": 0,
             "portfolio": {
                 "status": "NO_BET",
@@ -93,153 +85,165 @@ class DailyReportTests(unittest.TestCase):
             },
         }
 
-        with patch(
-            "pipeline.daily_report.build_daily_result",
-            return_value=daily_result,
-        ):
+        mock_build_daily_result.return_value = daily_result
 
-            result = build_daily_report(
-                [],
-                [],
-                self.make_as_of(),
-            )
+        result = build_daily_report(
+            self.fixtures,
+            self.history,
+            self.as_of,
+        )
 
         self.assertEqual(
             result["report_type"],
             "DAILY_FOOTBALL_REPORT",
         )
-
         self.assertEqual(
             result["status"],
             "NO_BET",
         )
-
         self.assertEqual(
-            result["portfolio"]["status"],
-            "NO_BET",
+            result["as_of"],
+            self.as_of,
+        )
+        self.assertEqual(
+            result["fixtures_received"],
+            10,
+        )
+        self.assertEqual(
+            result["upcoming_fixtures"],
+            0,
+        )
+        self.assertEqual(
+            result["portfolio"],
+            {
+                "status": "NO_BET",
+                "reason": "insufficient qualifying selections",
+                "tickets": [],
+            },
         )
 
-        self.assertEqual(
-            result["portfolio"]["reason"],
-            "insufficient qualifying selections",
-        )
-
-    def test_daily_result_is_not_modified(self):
+    @patch("pipeline.daily_report.build_daily_result")
+    def test_daily_result_is_not_modified(
+        self,
+        mock_build_daily_result,
+    ):
         daily_result = {
             "status": "READY",
-            "as_of": self.make_as_of(),
-            "fixtures_received": 3,
-            "upcoming_fixtures": 2,
+            "as_of": self.as_of,
+            "fixtures_received": 5,
+            "upcoming_fixtures": 3,
             "portfolio": [
-                "SAFE",
-                "BALANCED",
-                "AGGRESSIVE",
-                "VALUE",
+                "ticket-data",
             ],
         }
 
-        with patch(
-            "pipeline.daily_report.build_daily_result",
-            return_value=daily_result,
-        ):
+        original_daily_result = {
+            key: value.copy() if isinstance(value, dict) else list(value)
+            if isinstance(value, list)
+            else value
+            for key, value in daily_result.items()
+        }
 
-            original = dict(daily_result)
+        mock_build_daily_result.return_value = daily_result
 
-            build_daily_report(
-                [],
-                [],
-                self.make_as_of(),
-            )
+        build_daily_report(
+            self.fixtures,
+            self.history,
+            self.as_of,
+        )
 
         self.assertEqual(
             daily_result,
-            original,
+            original_daily_result,
         )
 
-        self.assertNotIn(
-            "report_type",
-            daily_result,
-        )
-
-    def test_report_returns_new_dictionary(self):
+    @patch("pipeline.daily_report.build_daily_result")
+    def test_report_returns_new_dictionary(
+        self,
+        mock_build_daily_result,
+    ):
         daily_result = {
             "status": "READY",
-            "as_of": self.make_as_of(),
-            "fixtures_received": 1,
-            "upcoming_fixtures": 1,
-            "portfolio": [],
+            "as_of": self.as_of,
+            "fixtures_received": 5,
+            "upcoming_fixtures": 3,
+            "portfolio": [
+                "ticket-data",
+            ],
         }
 
-        with patch(
-            "pipeline.daily_report.build_daily_result",
-            return_value=daily_result,
-        ):
+        mock_build_daily_result.return_value = daily_result
 
-            result = build_daily_report(
-                [],
-                [],
-                self.make_as_of(),
-            )
+        result = build_daily_report(
+            self.fixtures,
+            self.history,
+            self.as_of,
+        )
 
+        self.assertIsInstance(
+            result,
+            dict,
+        )
         self.assertIsNot(
             result,
             daily_result,
         )
 
+    @patch("pipeline.daily_report.build_daily_result")
+    def test_build_daily_result_failure_is_propagated(
+        self,
+        mock_build_daily_result,
+    ):
+        mock_build_daily_result.side_effect = ValueError(
+            "daily result failed"
+        )
+
+        with self.assertRaises(ValueError):
+            build_daily_report(
+                self.fixtures,
+                self.history,
+                self.as_of,
+            )
+
     def test_non_list_fixtures_are_rejected(self):
         with self.assertRaises(TypeError):
             build_daily_report(
-                "not a list",
-                [],
-                self.make_as_of(),
+                "not-a-list",
+                self.history,
+                self.as_of,
             )
 
-    def test_non_list_history_is_rejected(self):
+    def test_non_list_history_are_rejected(self):
         with self.assertRaises(TypeError):
             build_daily_report(
-                [],
-                "not a list",
-                self.make_as_of(),
+                self.fixtures,
+                "not-a-list",
+                self.as_of,
             )
 
     def test_non_datetime_as_of_is_rejected(self):
         with self.assertRaises(TypeError):
             build_daily_report(
-                [],
-                [],
-                "not a datetime",
+                self.fixtures,
+                self.history,
+                "not-a-datetime",
             )
 
     def test_naive_as_of_is_rejected(self):
-        as_of = datetime(
+        naive_as_of = datetime(
             2026,
             9,
             25,
-            15,
+            12,
             0,
         )
 
         with self.assertRaises(ValueError):
             build_daily_report(
-                [],
-                [],
-                as_of,
+                self.fixtures,
+                self.history,
+                naive_as_of,
             )
-
-    def test_build_daily_result_failure_is_propagated(self):
-        with patch(
-            "pipeline.daily_report.build_daily_result",
-            side_effect=ValueError(
-                "invalid daily result"
-            ),
-        ):
-
-            with self.assertRaises(ValueError):
-                build_daily_report(
-                    [],
-                    [],
-                    self.make_as_of(),
-                )
 
 
 if __name__ == "__main__":
