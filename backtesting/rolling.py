@@ -8,6 +8,11 @@ from markets.engine import get_supported_markets
 from data.historical_models import HistoricalMatch
 
 
+# Small positive floor used only when a very small historical
+# sample produces a zero league-goal baseline.
+MIN_EXPECTED_GOALS = 0.0001
+
+
 def _validate_stake(stake):
     if isinstance(stake, bool) or not isinstance(stake, (int, float)):
         raise ValueError("stake must be numeric")
@@ -19,13 +24,12 @@ def _validate_stake(stake):
         raise ValueError("stake must be greater than zero")
 
 
-def _historical_to_match(historical_match: HistoricalMatch) -> Match:
+def _historical_to_match(
+    historical_match: HistoricalMatch,
+) -> Match:
     """
-    Convert a HistoricalMatch into the Match structure expected
+    Convert HistoricalMatch into the Match structure required
     by the feature-engineering layer.
-
-    The original HistoricalMatch remains the authoritative object
-    for historical result settlement.
     """
 
     return Match(
@@ -39,6 +43,44 @@ def _historical_to_match(historical_match: HistoricalMatch) -> Match:
     )
 
 
+def _stabilize_goal_baselines(features: dict) -> dict:
+    """
+    Prevent zero league-goal baselines from creating impossible
+    expected-goal values during the earliest rolling windows.
+
+    This only affects the rolling backtest. The core prediction
+    engine continues to reject truly invalid zero expected goals.
+    """
+
+    stabilized = dict(features)
+
+    for key in (
+        "league_avg_home_goals",
+        "league_avg_away_goals",
+    ):
+        value = stabilized.get(key)
+
+        if value is None:
+            raise ValueError(
+                f"Missing required feature: {key}"
+            )
+
+        if not isinstance(value, (int, float)):
+            raise ValueError(
+                f"Feature {key} must be numeric"
+            )
+
+        if not math.isfinite(value):
+            raise ValueError(
+                f"Feature {key} must be finite"
+            )
+
+        if value <= 0:
+            stabilized[key] = MIN_EXPECTED_GOALS
+
+    return stabilized
+
+
 def rolling_backtest(
     matches: list,
     market: str,
@@ -47,8 +89,8 @@ def rolling_backtest(
     """
     Perform a chronological historical backtest.
 
-    Every target match is predicted using only historical matches
-    that occurred strictly before the target kickoff.
+    Every target match is predicted using only historical
+    matches that occurred strictly before the target kickoff.
     """
 
     if not isinstance(matches, list):
@@ -58,7 +100,9 @@ def rolling_backtest(
         raise ValueError("market must be a string")
 
     if market not in get_supported_markets():
-        raise ValueError(f"Unsupported market: {market}")
+        raise ValueError(
+            f"Unsupported market: {market}"
+        )
 
     _validate_stake(stake)
 
@@ -76,21 +120,31 @@ def rolling_backtest(
     results = []
 
     for index, target_match in enumerate(ordered_matches):
+
         previous_matches = [
             historical_match
             for historical_match in ordered_matches[:index]
             if historical_match.kickoff < target_match.kickoff
         ]
 
-        # No prior information means no historical prediction.
+        # No historical information exists yet.
         if not previous_matches:
             continue
 
-        feature_target = _historical_to_match(target_match)
+        feature_target = _historical_to_match(
+            target_match
+        )
 
         features = build_match_features(
             target_match=feature_target,
             historical_matches=previous_matches,
+        )
+
+        # Early rolling windows can contain a zero league-goal
+        # baseline. Stabilize that input without changing the
+        # core prediction engine's validation rules.
+        features = _stabilize_goal_baselines(
+            features
         )
 
         predictions = predict_match_from_features(
@@ -101,7 +155,6 @@ def rolling_backtest(
 
         odds = target_match.odds.get(market)
 
-        # Skip markets where historical odds are unavailable.
         if odds is None:
             continue
 
@@ -128,7 +181,9 @@ def rolling_backtest(
                 "won": result["won"],
                 "return_amount": result["return_amount"],
                 "profit_loss": result["profit_loss"],
-                "history_matches": len(previous_matches),
+                "history_matches": len(
+                    previous_matches
+                ),
                 "history_cutoff": target_match.kickoff,
                 "history_last_match_id": (
                     previous_matches[-1].match_id
