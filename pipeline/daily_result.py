@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from pipeline.daily_result_validator import (
+    validate_daily_result,
+)
 from pipeline.daily_runner import run_daily_pipeline
 from pipeline.daily_time_guard import filter_upcoming_fixtures
 
@@ -62,8 +65,7 @@ def build_daily_result(
             No qualifying selections are available, or the
             portfolio explicitly reports a NO_BET state.
 
-    The portfolio itself is preserved unchanged when it already
-    contains an explicit NO_BET result.
+    The completed result is validated before being returned.
     """
     if not isinstance(fixtures, list):
         raise TypeError(
@@ -91,15 +93,23 @@ def build_daily_result(
     if portfolio == []:
         portfolio = _build_no_bet_result()
         status = "NO_BET"
+
     elif _is_no_bet_portfolio(portfolio):
         status = "NO_BET"
+
     else:
         status = "READY"
 
-    return {
+    result = {
         "status": status,
         "as_of": as_of,
         "fixtures_received": len(fixtures),
         "upcoming_fixtures": len(upcoming),
         "portfolio": portfolio,
     }
+
+    validate_daily_result(
+        result
+    )
+
+    return result
