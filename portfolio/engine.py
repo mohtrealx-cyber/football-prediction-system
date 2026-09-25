@@ -9,6 +9,18 @@ from tickets.builder import Selection, Ticket
 MAX_MATCH_USAGE = 2
 DIVERSITY_PENALTY = 6.0
 
+
+MARKET_SELECTIONS = {
+    "home_win": "HOME",
+    "draw": "DRAW",
+    "away_win": "AWAY",
+    "over_2_5": "OVER_2_5",
+    "under_2_5": "UNDER_2_5",
+    "btts_yes": "BTTS_YES",
+    "btts_no": "BTTS_NO",
+}
+
+
 TICKET_PROFILES = {
     "SAFE": {
         "stake_percent": 40.0,
@@ -49,12 +61,22 @@ def _validate_candidates(
 def _candidate_to_selection(
     candidate: dict,
 ) -> Selection:
+    """
+    Convert a candidate dictionary into a Selection object.
+
+    Supports both:
+    1. Older candidates where odds is numeric and selection may be absent.
+    2. Daily-real candidates where:
+       - odds = complete market odds dictionary
+       - selected_odds = numeric price for the selected market
+       - selection = explicit selection label
+    """
+
     required_fields = (
         "match_id",
         "home_team",
         "away_team",
         "market",
-        "selection",
         "odds",
         "score",
     )
@@ -70,6 +92,26 @@ def _candidate_to_selection(
             f"Candidate is missing fields: {missing_fields}"
         )
 
+    market = candidate["market"]
+
+    # New daily-real candidates already provide "selection".
+    # Older portfolio candidates may not, so derive it from
+    # the market name.
+    selection_value = candidate.get(
+        "selection"
+    )
+
+    if selection_value is None:
+        selection_value = MARKET_SELECTIONS.get(
+            market
+        )
+
+    if selection_value is None:
+        raise ValueError(
+            f"Unknown market and no selection provided: {market}"
+        )
+
+    # Prefer the explicitly selected market price.
     odds_value = candidate.get(
         "selected_odds"
     )
@@ -79,15 +121,12 @@ def _candidate_to_selection(
             "odds"
         )
 
-    # Real daily candidates preserve the complete market-odds
-    # dictionary under "odds". The actual price for the selected
-    # market is carried separately in "selected_odds".
+    # Daily-real candidates preserve all market odds inside
+    # the "odds" dictionary.
     if isinstance(
         odds_value,
         dict,
     ):
-        market = candidate["market"]
-
         if market not in odds_value:
             raise ValueError(
                 "Candidate odds are missing market: "
@@ -108,10 +147,12 @@ def _candidate_to_selection(
         match_id=candidate["match_id"],
         home_team=candidate["home_team"],
         away_team=candidate["away_team"],
-        market=candidate["market"],
-        selection=candidate["selection"],
+        market=market,
+        selection=selection_value,
         odds=float(odds_value),
-        score=float(candidate["score"]),
+        score=float(
+            candidate["score"]
+        ),
     )
 
 
@@ -143,6 +184,38 @@ def _selection_match_id(
     )
 
 
+def _candidate_selection_name(
+    candidate: dict,
+) -> str:
+    """
+    Return the candidate selection name.
+
+    Uses explicit "selection" when available.
+    Otherwise derives it from the market.
+    """
+
+    selection_value = candidate.get(
+        "selection"
+    )
+
+    if selection_value is not None:
+        return str(
+            selection_value
+        )
+
+    market = candidate.get(
+        "market",
+        "",
+    )
+
+    return str(
+        MARKET_SELECTIONS.get(
+            market,
+            "",
+        )
+    )
+
+
 def _rank_candidates_for_ticket(
     candidates: list[dict],
     ticket_name: str,
@@ -152,7 +225,9 @@ def _rank_candidates_for_ticket(
         ticket_name
     ]
 
-    metric = profile["metric"]
+    metric = profile[
+        "metric"
+    ]
 
     ranked = []
 
@@ -199,8 +274,15 @@ def _rank_candidates_for_ticket(
             str(
                 item[2]["match_id"]
             ),
-            item[2]["market"],
-            item[2]["selection"],
+            str(
+                item[2].get(
+                    "market",
+                    "",
+                )
+            ),
+            _candidate_selection_name(
+                item[2]
+            ),
         )
     )
 
@@ -244,6 +326,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
+        # No duplicate match inside one ticket.
         if match_id in used_match_ids:
             continue
 
@@ -264,12 +347,12 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force weak selections. A ticket can only be created
-    # when it has the required minimum of three selections.
+    # Never force weak selections.
+    # A ticket requires at least three matches.
     if len(selections) < 3:
         return []
 
-    # Prefer the configured ticket size when enough valid,
+    # Prefer the configured ticket size when enough
     # independent matches are available.
     if len(selections) > preferred_count:
         selections = selections[
@@ -336,6 +419,7 @@ def build_smart_portfolio(
                 "each candidate must be a dictionary"
             )
 
+        # Explicitly unqualified candidates are excluded.
         if candidate.get(
             "qualified"
         ) is False:
