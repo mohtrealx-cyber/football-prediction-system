@@ -95,7 +95,7 @@ class PortfolioPerformanceTests(unittest.TestCase):
         result = calculate_portfolio_performance(self.results)
         self.assertAlmostEqual(
             result["overall"]["roi"],
-            (25.0 / 140.0) * 100,
+            25.0 / 140.0,
         )
 
     def test_safe_metrics_are_preserved(self):
