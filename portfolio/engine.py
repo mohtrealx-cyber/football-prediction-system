@@ -62,12 +62,13 @@ def _candidate_selection_name(
     candidate: dict,
 ) -> str:
     """
-    Return a selection label for deterministic sorting.
+    Resolve a selection name for deterministic sorting.
 
-    New candidates may already contain "selection".
+    Newer candidates normally contain "selection".
 
-    Older candidates may not contain it, so the market name
-    is used as a safe fallback.
+    Older candidates may omit "selection", so the known
+    market mapping is used. Unknown legacy markets fall back
+    to the market name itself.
     """
 
     selection_value = candidate.get(
@@ -98,18 +99,18 @@ def _resolve_candidate_odds(
     candidate: dict,
 ) -> float:
     """
-    Resolve the numeric odds used by Selection.
+    Resolve the numeric odds for the selected market.
 
-    Supported formats:
+    Supports both candidate formats.
 
-    New daily-real candidate:
+    Daily-real:
         odds = {
             "home_win": 1.80,
             ...
         }
         selected_odds = 1.80
 
-    Legacy candidate:
+    Older candidates:
         odds = 1.80
     """
 
@@ -151,23 +152,161 @@ def _resolve_candidate_odds(
     )
 
 
+def _resolve_confidence(
+    candidate: dict,
+) -> float:
+    """
+    Resolve Selection.confidence.
+
+    Priority:
+    1. Explicit candidate confidence.
+    2. model_probability converted from 0-1 to 0-100.
+    3. Candidate score as a legacy fallback.
+    """
+
+    confidence = candidate.get(
+        "confidence"
+    )
+
+    if confidence is None:
+        model_probability = candidate.get(
+            "model_probability"
+        )
+
+        if isinstance(
+            model_probability,
+            (int, float),
+        ):
+            confidence = (
+                float(model_probability)
+                * 100.0
+            )
+
+        else:
+            confidence = candidate.get(
+                "score",
+                0.0,
+            )
+
+    if not isinstance(
+        confidence,
+        (int, float),
+    ):
+        raise TypeError(
+            "Candidate confidence must be numeric"
+        )
+
+    confidence = float(
+        confidence
+    )
+
+    if confidence < 0.0:
+        confidence = 0.0
+
+    if confidence > 100.0:
+        confidence = 100.0
+
+    return confidence
+
+
+def _resolve_value_edge(
+    candidate: dict,
+) -> float:
+    """
+    Resolve Selection.value_edge.
+
+    Daily-real candidates provide value_edge directly.
+
+    Older candidates that do not provide it use 0.0.
+    """
+
+    value_edge = candidate.get(
+        "value_edge",
+        0.0,
+    )
+
+    if not isinstance(
+        value_edge,
+        (int, float),
+    ):
+        raise TypeError(
+            "Candidate value_edge must be numeric"
+        )
+
+    value_edge = float(
+        value_edge
+    )
+
+    # Selection.validate() requires value_edge >= 0.
+    if value_edge < 0.0:
+        value_edge = 0.0
+
+    return value_edge
+
+
+def _resolve_match(
+    candidate: dict,
+) -> str:
+    """
+    Build the human-readable match string required by Selection.
+    """
+
+    home_team = candidate.get(
+        "home_team"
+    )
+
+    away_team = candidate.get(
+        "away_team"
+    )
+
+    if not isinstance(
+        home_team,
+        str,
+    ) or not home_team.strip():
+        raise ValueError(
+            "Candidate home_team cannot be empty"
+        )
+
+    if not isinstance(
+        away_team,
+        str,
+    ) or not away_team.strip():
+        raise ValueError(
+            "Candidate away_team cannot be empty"
+        )
+
+    return (
+        f"{home_team.strip()} vs "
+        f"{away_team.strip()}"
+    )
+
+
 def _candidate_to_selection(
     candidate: dict,
 ) -> Selection:
     """
     Convert a candidate dictionary into the project's
-    Selection object.
+    actual Selection dataclass.
 
-    Candidate metadata such as:
+    Selection requires:
+
+        match_id
+        match
+        market
+        odds
+        confidence
+        value_edge
+
+    The candidate may contain additional fields such as:
+
         home_team
         away_team
         selection
         score
+        model_probability
+        selected_odds
 
-    remains at candidate level.
-
-    Selection is constructed only with the fields supported
-    by tickets.builder.Selection.
+    Those are used to construct the required Selection fields.
     """
 
     required_fields = (
@@ -194,11 +333,34 @@ def _candidate_to_selection(
         candidate
     )
 
-    return Selection(
-        match_id=candidate["match_id"],
-        market=candidate["market"],
-        odds=odds_value,
+    confidence = _resolve_confidence(
+        candidate
     )
+
+    value_edge = _resolve_value_edge(
+        candidate
+    )
+
+    match = _resolve_match(
+        candidate
+    )
+
+    selection = Selection(
+        match_id=str(
+            candidate["match_id"]
+        ),
+        match=match,
+        market=str(
+            candidate["market"]
+        ),
+        odds=odds_value,
+        confidence=confidence,
+        value_edge=value_edge,
+    )
+
+    selection.validate()
+
+    return selection
 
 
 def _candidate_metric(
@@ -341,15 +503,13 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # Never repeat a match within one ticket.
+        # Prevent duplicate matches inside one ticket.
         if match_id in used_match_ids:
             continue
 
         selection = _candidate_to_selection(
             candidate
         )
-
-        selection.validate()
 
         selections.append(
             selection
@@ -362,11 +522,11 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force a ticket with fewer than three valid matches.
+    # Never force an incomplete ticket.
     if len(selections) < 3:
         return []
 
-    # Prefer the configured ticket size.
+    # Use the configured preferred ticket size.
     if len(selections) > preferred_count:
         selections = selections[
             :preferred_count
@@ -391,7 +551,12 @@ def _build_ticket(
         selections=selections,
     )
 
-    ticket.validate()
+    ticket.validate_tickets(
+        [ticket]
+    ) if hasattr(
+        ticket,
+        "validate_tickets",
+    ) else None
 
     return ticket
 
