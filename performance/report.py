@@ -1,60 +1,62 @@
 from markets.engine import get_supported_markets
 from performance.engine import calculate_performance
 from performance.market import calculate_market_performance
+from performance.streaks import calculate_streaks
 
 
 def build_performance_report(results: dict) -> dict:
     """
-    Build one overall performance report containing:
+    Build the complete performance report.
 
-    1. Overall performance across all supported markets.
-    2. Separate performance for each market.
+    The report contains:
+    - overall performance across all market results
+    - performance for each supported market
+    - streak statistics across all market results
     """
 
     if not isinstance(results, dict):
         raise TypeError("results must be a dictionary")
 
     supported_markets = get_supported_markets()
-    supported_market_set = set(supported_markets)
+    required_markets = set(supported_markets)
+    provided_markets = set(results.keys())
 
-    provided_market_set = set(results.keys())
-
-    # Reject unknown markets.
-    unknown_markets = provided_market_set - supported_market_set
-
+    unknown_markets = provided_markets - required_markets
     if unknown_markets:
         raise ValueError(
-            f"Unsupported market(s): {sorted(unknown_markets)}"
+            f"unknown markets: {sorted(unknown_markets)}"
         )
 
-    # Require every supported market.
-    missing_markets = supported_market_set - provided_market_set
-
+    missing_markets = required_markets - provided_markets
     if missing_markets:
         raise ValueError(
-            f"Missing market(s): {sorted(missing_markets)}"
+            f"missing markets: {sorted(missing_markets)}"
         )
 
-    # First calculate the individual market performance.
+    # Calculate performance separately for every market.
     market_performance = calculate_market_performance(results)
 
-    # Combine all market results into one overall result list.
+    # Combine all market results into one list for overall performance
+    # and streak calculations.
     all_results = []
 
-    for market in supported_markets:
-        market_results = results[market]
+    for market_name in supported_markets:
+        market_results = results[market_name]
 
         if not isinstance(market_results, list):
             raise TypeError(
-                f"Results for {market} must be a list"
+                f"results for market '{market_name}' must be a list"
             )
 
         all_results.extend(market_results)
 
-    # Calculate the overall performance.
     overall_performance = calculate_performance(all_results)
+
+    # Calculate streaks across all market results.
+    streaks = calculate_streaks(all_results)
 
     return {
         "overall": overall_performance,
         "markets": market_performance,
+        "streaks": streaks,
     }
