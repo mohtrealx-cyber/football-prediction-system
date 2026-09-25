@@ -26,11 +26,13 @@ MARKET_SELECTIONS = {
 
 
 def _validate_fixture(fixture: Any) -> None:
+    """Validate one scheduled fixture."""
     if not isinstance(fixture, Match):
         raise TypeError("each fixture must be a Match")
 
 
 def _validate_history_item(history_match: Any) -> None:
+    """Validate one historical match."""
     if not isinstance(history_match, HistoricalMatch):
         raise TypeError(
             "each historical match must be a HistoricalMatch"
@@ -41,13 +43,22 @@ def _calculate_score(
     model_probability: float,
     value_edge: float,
 ) -> float:
+    """
+    Calculate the candidate score.
+
+    70% comes from model probability.
+    30% comes from positive value edge, capped at 20 percentage points.
+    """
     capped_edge = min(
         max(value_edge, 0.0),
         VALUE_EDGE_CAP,
     )
 
     probability_component = model_probability * 70.0
-    value_component = (capped_edge / VALUE_EDGE_CAP) * 30.0
+
+    value_component = (
+        capped_edge / VALUE_EDGE_CAP
+    ) * 30.0
 
     return probability_component + value_component
 
@@ -58,7 +69,9 @@ def _build_candidate(
     model_probability: float,
     odds: float,
 ) -> dict[str, Any]:
+    """Build one scored market candidate."""
     implied_probability = 1.0 / odds
+
     expected_value = (
         model_probability * odds
     ) - 1.0
@@ -94,6 +107,10 @@ def build_daily_real_candidates(
     fixtures: list[Match],
     history: list[HistoricalMatch],
 ) -> list[dict[str, Any]]:
+    """
+    Build market candidates from scheduled fixtures using only
+    historical matches that occurred before each fixture kickoff.
+    """
     if not isinstance(fixtures, list):
         raise TypeError("fixtures must be a list")
 
@@ -111,9 +128,11 @@ def build_daily_real_candidates(
     supported_markets = get_supported_markets()
 
     for fixture in fixtures:
+        # Only scheduled fixtures belong in the daily candidate pipeline.
         if fixture.status != "scheduled":
             continue
 
+        # Never use historical information from the future.
         prior_history = sorted(
             (
                 historical_match
@@ -123,15 +142,18 @@ def build_daily_real_candidates(
             key=lambda historical_match: historical_match.kickoff,
         )
 
-        # No historical information means there is not enough
-        # information for the feature model yet.
+        # Without any prior history, there is not enough information
+        # for the feature model.
         if not prior_history:
             continue
 
+        # IMPORTANT:
+        # build_match_features expects historical_matches FIRST,
+        # then the target fixture.
         features = build_match_features(
-    prior_history,
-    fixture,
-)
+            prior_history,
+            fixture,
+        )
 
         predictions = predict_match_from_features(
             features
@@ -140,13 +162,17 @@ def build_daily_real_candidates(
         for market in supported_markets:
             odds = fixture.odds.get(market)
 
+            # Missing market odds are skipped.
             if odds is None:
                 continue
 
+            # Reject invalid odds values.
             if not isinstance(odds, (int, float)):
                 continue
 
-            if not math.isfinite(float(odds)):
+            odds = float(odds)
+
+            if not math.isfinite(odds):
                 continue
 
             if odds <= 1.0:
@@ -154,6 +180,7 @@ def build_daily_real_candidates(
 
             model_probability = predictions.get(market)
 
+            # Missing model probabilities are skipped.
             if model_probability is None:
                 continue
 
@@ -165,21 +192,24 @@ def build_daily_real_candidates(
 
             model_probability = float(model_probability)
 
+            # Reject invalid model probabilities.
             if not math.isfinite(model_probability):
                 continue
 
             if not 0.0 <= model_probability <= 1.0:
                 continue
 
-            candidates.append(
-                _build_candidate(
-                    fixture=fixture,
-                    market=market,
-                    model_probability=model_probability,
-                    odds=float(odds),
-                )
+            candidate = _build_candidate(
+                fixture=fixture,
+                market=market,
+                model_probability=model_probability,
+                odds=odds,
             )
 
+            candidates.append(candidate)
+
+    # Highest score first.
+    # Deterministic secondary ordering keeps test runs reproducible.
     candidates.sort(
         key=lambda item: (
             -float(item["score"]),
