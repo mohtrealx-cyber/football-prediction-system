@@ -34,6 +34,16 @@ def _build_no_bet_result() -> dict:
     }
 
 
+def _is_no_bet_portfolio(portfolio: Any) -> bool:
+    if portfolio == []:
+        return True
+
+    if isinstance(portfolio, dict):
+        return portfolio.get("status") == "NO_BET"
+
+    return False
+
+
 def build_daily_result(
     fixtures: list,
     history: list,
@@ -46,12 +56,14 @@ def build_daily_result(
     Status values:
 
         READY
-            A non-empty portfolio was produced.
+            A usable non-empty portfolio was produced.
 
         NO_BET
-            No qualifying portfolio was produced.
+            No qualifying selections are available, or the
+            portfolio explicitly reports a NO_BET state.
 
-    The portfolio itself is preserved unchanged when non-empty.
+    The portfolio itself is preserved unchanged when it already
+    contains an explicit NO_BET result.
     """
     if not isinstance(fixtures, list):
         raise TypeError(
@@ -78,6 +90,8 @@ def build_daily_result(
 
     if portfolio == []:
         portfolio = _build_no_bet_result()
+        status = "NO_BET"
+    elif _is_no_bet_portfolio(portfolio):
         status = "NO_BET"
     else:
         status = "READY"
