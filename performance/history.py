@@ -1,7 +1,5 @@
 from typing import Any
 
-from performance.period import calculate_period_performance
-
 
 REQUIRED_FIELDS = (
     "date",
