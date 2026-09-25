@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Sequence
 from tickets.builder import Selection, Ticket
 
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Portfolio configuration
+# ---------------------------------------------------------------------------
 
 TICKET_SPECS = {
     "SAFE": {
@@ -16,28 +16,24 @@ TICKET_SPECS = {
         "preferred_matches": 3,
         "max_matches": 4,
         "metric": "score",
-        "threshold": 80.0,
     },
     "BALANCED": {
         "stake_percent": 30.0,
         "preferred_matches": 4,
         "max_matches": 5,
         "metric": "score",
-        "threshold": 70.0,
     },
     "AGGRESSIVE": {
         "stake_percent": 20.0,
         "preferred_matches": 5,
         "max_matches": 6,
         "metric": "score",
-        "threshold": 60.0,
     },
     "VALUE": {
         "stake_percent": 10.0,
         "preferred_matches": 4,
         "max_matches": 5,
         "metric": "value_edge",
-        "threshold": 5.0,
     },
 }
 
@@ -53,56 +49,31 @@ MAX_MATCH_USAGE = 2
 DIVERSITY_PENALTY = 6.0
 
 
-# ============================================================================
-# LEGACY SMART-PORTFOLIO CANDIDATE CONTRACT
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Candidate interface
+# ---------------------------------------------------------------------------
 
-LEGACY_REQUIRED_FIELDS = (
+REQUIRED_CANDIDATE_FIELDS = (
     "match_id",
-    "home_team",
-    "away_team",
     "market",
+    "selection",
     "odds",
     "score",
     "value_edge",
 )
 
 
-# ============================================================================
-# MODERN MARKET-PORTFOLIO CANDIDATE CONTRACT
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
 
-MARKET_REQUIRED_FIELDS = (
-    "match_id",
-    "market",
-    "odds",
-    "score",
-    "value_edge",
-)
-
-
-# ============================================================================
-# BASIC VALIDATION
-# ============================================================================
-
-def _validate_candidate_dict(candidate: Any) -> None:
+def _validate_candidate(candidate: dict) -> None:
     if not isinstance(candidate, dict):
         raise TypeError("candidate must be a dictionary")
 
-
-def _validate_legacy_candidate(candidate: dict) -> None:
-    """
-    Validation for the original smart portfolio API.
-
-    The original tests/callers expect home_team and away_team to exist.
-    selection is intentionally NOT required because the old interface
-    derived it from market.
-    """
-    _validate_candidate_dict(candidate)
-
     missing = [
         field
-        for field in LEGACY_REQUIRED_FIELDS
+        for field in REQUIRED_CANDIDATE_FIELDS
         if field not in candidate
     ]
 
@@ -113,51 +84,13 @@ def _validate_legacy_candidate(candidate: dict) -> None:
         )
 
 
-def _validate_market_candidate(candidate: dict) -> None:
-    """
-    Validation for the newer market portfolio API.
-
-    home_team and away_team are intentionally optional here because newer
-    candidates may instead provide a ready-made 'match' field.
-    """
-    _validate_candidate_dict(candidate)
-
-    missing = [
-        field
-        for field in MARKET_REQUIRED_FIELDS
-        if field not in candidate
-    ]
-
-    if missing:
-        raise ValueError(
-            "candidate is missing required field(s): "
-            + ", ".join(missing)
-        )
-
-
-def _validate_legacy_candidates(
-    candidates: Sequence[dict],
-) -> None:
-    if not isinstance(candidates, (list, tuple)):
+def _validate_candidates(candidates: Sequence[dict]) -> None:
+    if not isinstance(candidates, list):
         raise TypeError("candidates must be a list")
 
     for candidate in candidates:
-        _validate_legacy_candidate(candidate)
+        _validate_candidate(candidate)
 
-
-def _validate_market_candidates(
-    candidates: Sequence[dict],
-) -> None:
-    if not isinstance(candidates, (list, tuple)):
-        raise TypeError("candidates must be a list")
-
-    for candidate in candidates:
-        _validate_market_candidate(candidate)
-
-
-# ============================================================================
-# NUMERIC HELPERS
-# ============================================================================
 
 def _safe_float(value: Any, field_name: str) -> float:
     try:
@@ -175,148 +108,55 @@ def _safe_float(value: Any, field_name: str) -> float:
     return number
 
 
-# ============================================================================
-# MATCH / MARKET / SELECTION RESOLUTION
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Candidate field resolution
+# ---------------------------------------------------------------------------
 
 def _resolve_match_id(candidate: dict) -> str:
     match_id = candidate.get("match_id")
 
     if match_id is None:
-        raise ValueError("candidate match_id cannot be missing")
+        raise ValueError(
+            "candidate match_id cannot be missing"
+        )
 
     match_id = str(match_id).strip()
 
     if not match_id:
-        raise ValueError("candidate match_id cannot be empty")
+        raise ValueError(
+            "candidate match_id cannot be empty"
+        )
 
     return match_id
-
-
-def _resolve_match(candidate: dict) -> str:
-    """
-    Build the human-readable match string expected by Selection.
-
-    Priority:
-        1. existing 'match'
-        2. home_team + away_team
-        3. match_id
-    """
-    if "match" in candidate and candidate["match"] is not None:
-        match = str(candidate["match"]).strip()
-
-        if match:
-            return match
-
-    home_team = candidate.get("home_team")
-    away_team = candidate.get("away_team")
-
-    if home_team is not None and away_team is not None:
-        home = str(home_team).strip()
-        away = str(away_team).strip()
-
-        if home and away:
-            return f"{home} vs {away}"
-
-    return _resolve_match_id(candidate)
 
 
 def _resolve_market(candidate: dict) -> str:
     market = candidate.get("market")
 
-    if not isinstance(market, str):
-        raise ValueError("candidate market must be a non-empty string")
+    if not isinstance(market, str) or not market.strip():
+        raise ValueError(
+            "candidate market must be a non-empty string"
+        )
 
-    market = market.strip()
-
-    if not market:
-        raise ValueError("candidate market must be a non-empty string")
-
-    return market
-
-
-def _derive_selection_from_market(market: str) -> str:
-    """
-    Convert market identifiers into the legacy selection label.
-
-    This is intentionally simple because Selection itself stores:
-        match_id, match, market, odds, confidence, value_edge
-
-    The extra candidate-level 'selection' field is not part of Selection.
-    """
-    normalized = market.strip().upper()
-
-    mapping = {
-        "HOME_WIN": "HOME",
-        "HOME": "HOME",
-        "1": "HOME",
-
-        "DRAW": "DRAW",
-        "X": "DRAW",
-
-        "AWAY_WIN": "AWAY",
-        "AWAY": "AWAY",
-        "2": "AWAY",
-
-        "OVER_2_5": "OVER_2_5",
-        "OVER 2.5": "OVER_2_5",
-        "O2.5": "OVER_2_5",
-
-        "UNDER_2_5": "UNDER_2_5",
-        "UNDER 2.5": "UNDER_2_5",
-        "U2.5": "UNDER_2_5",
-
-        "BTTS_YES": "BTTS_YES",
-        "BTTS YES": "BTTS_YES",
-        "BTTS": "BTTS_YES",
-
-        "BTTS_NO": "BTTS_NO",
-        "BTTS NO": "BTTS_NO",
-
-        # Legacy double-chance naming.
-        "1X": "1X",
-        "X2": "X2",
-        "12": "12",
-
-        # Draw-no-bet style legacy labels.
-        "DNB_HOME": "HOME",
-        "DNB_AWAY": "AWAY",
-    }
-
-    return mapping.get(normalized, normalized)
+    return market.strip()
 
 
 def _resolve_selection(candidate: dict) -> str:
-    """
-    Resolve a candidate-level selection.
+    selection = candidate.get("selection")
 
-    New candidates may explicitly provide 'selection'.
+    if not isinstance(selection, str) or not selection.strip():
+        raise ValueError(
+            "candidate selection must be a non-empty string"
+        )
 
-    Old candidates do not. In that case it is safely derived from 'market'.
-    """
-    if "selection" in candidate:
-        value = candidate["selection"]
+    return selection.strip()
 
-        if value is not None:
-            selection = str(value).strip()
-
-            if selection:
-                return selection
-
-    return _derive_selection_from_market(
-        _resolve_market(candidate)
-    )
-
-
-# ============================================================================
-# ODDS RESOLUTION
-# ============================================================================
 
 def _resolve_candidate_odds(candidate: dict) -> float:
     """
-    Resolve the numeric odds for the selected market.
+    Resolve the actual odds for the selected market.
 
-    Supported inputs:
+    Supported candidate formats:
 
         "odds": 1.80
 
@@ -329,10 +169,13 @@ def _resolve_candidate_odds(candidate: dict) -> float:
             ...
         }
 
-    A numeric 'selected_odds' takes priority when provided.
+    If selected_odds is supplied, it takes priority.
     """
 
-    # Newer daily pipeline provides selected_odds.
+    # ------------------------------------------------------------
+    # Explicit selected_odds
+    # ------------------------------------------------------------
+
     if "selected_odds" in candidate:
         selected_odds = candidate["selected_odds"]
 
@@ -349,70 +192,84 @@ def _resolve_candidate_odds(candidate: dict) -> float:
 
             return odds
 
+    # ------------------------------------------------------------
+    # Normal odds field
+    # ------------------------------------------------------------
+
     raw_odds = candidate.get("odds")
 
-    # Numeric odds.
-    if not isinstance(raw_odds, dict):
-        odds = _safe_float(raw_odds, "odds")
+    if isinstance(raw_odds, dict):
+        market = _resolve_market(candidate)
 
-        if odds <= 1.0:
-            raise ValueError(
-                "odds must be greater than 1.0"
+        # Direct market lookup.
+        if market in raw_odds:
+            odds = _safe_float(
+                raw_odds[market],
+                "odds",
             )
 
-        return odds
+        else:
+            # Compatibility aliases.
+            aliases = {
+                "home_win": (
+                    "HOME",
+                    "1",
+                ),
+                "draw": (
+                    "DRAW",
+                    "X",
+                ),
+                "away_win": (
+                    "AWAY",
+                    "2",
+                ),
+                "over_2_5": (
+                    "OVER_2_5",
+                    "OVER 2.5",
+                ),
+                "under_2_5": (
+                    "UNDER_2_5",
+                    "UNDER 2.5",
+                ),
+                "btts_yes": (
+                    "BTTS_YES",
+                    "BTTS YES",
+                ),
+                "btts_no": (
+                    "BTTS_NO",
+                    "BTTS NO",
+                ),
+            }
 
-    # Dictionary odds.
-    market = _resolve_market(candidate)
+            found_value = None
 
-    if market in raw_odds:
+            for alias in aliases.get(market, ()):
+                if alias in raw_odds:
+                    found_value = raw_odds[alias]
+                    break
+
+            # Compatibility lookup by selection.
+            if found_value is None:
+                selection = candidate.get("selection")
+
+                if selection in raw_odds:
+                    found_value = raw_odds[selection]
+
+            if found_value is None:
+                raise ValueError(
+                    f"no odds found for market: {market}"
+                )
+
+            odds = _safe_float(
+                found_value,
+                "odds",
+            )
+
+    else:
         odds = _safe_float(
-            raw_odds[market],
+            raw_odds,
             "odds",
         )
-
-        if odds <= 1.0:
-            raise ValueError(
-                "odds must be greater than 1.0"
-            )
-
-        return odds
-
-    normalized_market = market.upper()
-
-    aliases = {
-        "HOME_WIN": ("HOME", "1"),
-        "DRAW": ("DRAW", "X"),
-        "AWAY_WIN": ("AWAY", "2"),
-        "OVER_2_5": ("OVER_2_5", "OVER 2.5"),
-        "UNDER_2_5": ("UNDER_2_5", "UNDER 2.5"),
-        "BTTS_YES": ("BTTS_YES", "BTTS YES"),
-        "BTTS_NO": ("BTTS_NO", "BTTS NO"),
-        "1X": ("1X",),
-        "X2": ("X2",),
-        "12": ("12",),
-    }
-
-    found = None
-
-    for alias in aliases.get(normalized_market, ()):
-        if alias in raw_odds:
-            found = raw_odds[alias]
-            break
-
-    # Try candidate-level selection as a fallback lookup key.
-    if found is None and "selection" in candidate:
-        selection = candidate["selection"]
-
-        if selection in raw_odds:
-            found = raw_odds[selection]
-
-    if found is None:
-        raise ValueError(
-            f"no odds found for market: {market}"
-        )
-
-    odds = _safe_float(found, "odds")
 
     if odds <= 1.0:
         raise ValueError(
@@ -422,13 +279,9 @@ def _resolve_candidate_odds(candidate: dict) -> float:
     return odds
 
 
-# ============================================================================
-# CONFIDENCE / VALUE EDGE
-# ============================================================================
-
 def _resolve_confidence(candidate: dict) -> float:
     """
-    Resolve the confidence required by tickets.builder.Selection.
+    Resolve Selection.confidence.
 
     Priority:
         1. explicit confidence
@@ -437,32 +290,30 @@ def _resolve_confidence(candidate: dict) -> float:
     """
 
     if "confidence" in candidate:
-        confidence = _safe_float(
+        value = _safe_float(
             candidate["confidence"],
             "confidence",
         )
 
     elif "model_probability" in candidate:
-        probability = _safe_float(
-            candidate["model_probability"],
-            "model_probability",
+        value = (
+            _safe_float(
+                candidate["model_probability"],
+                "model_probability",
+            )
+            * 100.0
         )
 
-        confidence = probability * 100.0
-
     else:
-        confidence = _safe_float(
+        value = _safe_float(
             candidate["score"],
             "score",
         )
 
-    # Selection.validate() requires 0 <= confidence <= 100.
-    confidence = max(
+    return max(
         0.0,
-        min(100.0, confidence),
+        min(100.0, value),
     )
-
-    return confidence
 
 
 def _resolve_value_edge(candidate: dict) -> float:
@@ -472,22 +323,63 @@ def _resolve_value_edge(candidate: dict) -> float:
     )
 
     if value_edge < 0:
-        raise ValueError(
-            "value_edge cannot be negative"
-        )
+        value_edge = 0.0
 
     return value_edge
 
 
-# ============================================================================
-# CANDIDATE -> SELECTION
-# ============================================================================
+def _resolve_match(candidate: dict) -> str:
+    """
+    Build the human-readable match string required by Selection.
+
+    Supported forms:
+
+        "match": "Alpha vs Beta"
+
+    or:
+
+        "home_team": "Alpha"
+        "away_team": "Beta"
+
+    or fallback to match_id.
+    """
+
+    # Preferred direct match field.
+    direct_match = candidate.get("match")
+
+    if direct_match is not None:
+        match = str(direct_match).strip()
+
+        if match:
+            return match
+
+    # Home/away compatibility.
+    home_team = candidate.get("home_team")
+    away_team = candidate.get("away_team")
+
+    if home_team is not None and away_team is not None:
+        home = str(home_team).strip()
+        away = str(away_team).strip()
+
+        if home and away:
+            return f"{home} vs {away}"
+
+    # Final fallback.
+    return _resolve_match_id(candidate)
+
+
+# ---------------------------------------------------------------------------
+# Candidate -> Selection
+# ---------------------------------------------------------------------------
 
 def _candidate_to_selection(candidate: dict) -> Selection:
     """
-    Convert either legacy or modern candidate data into the exact Selection
-    constructor defined in tickets/builder.py.
+    Convert a portfolio candidate to the exact Selection interface
+    defined in tickets/builder.py.
     """
+
+    _validate_candidate(candidate)
+
     match_id = _resolve_match_id(candidate)
     match = _resolve_match(candidate)
     market = _resolve_market(candidate)
@@ -509,14 +401,15 @@ def _candidate_to_selection(candidate: dict) -> Selection:
     return selection
 
 
-# ============================================================================
-# RANKING
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Ranking
+# ---------------------------------------------------------------------------
 
 def _candidate_metric(
     candidate: dict,
     metric: str,
 ) -> float:
+
     if metric == "score":
         return _safe_float(
             candidate["score"],
@@ -539,57 +432,44 @@ def _rank_candidates_for_ticket(
     ticket_name: str,
     usage_counts: Dict[str, int] | None = None,
 ) -> List[dict]:
-    """
-    Rank candidates for a specific ticket.
 
-    Candidates below the ticket threshold are excluded.
-
-    A match already used once receives a diversity penalty.
-
-    A match used MAX_MATCH_USAGE times is excluded.
-    """
     if ticket_name not in TICKET_SPECS:
         raise ValueError(
             f"unsupported ticket: {ticket_name}"
         )
 
-    if not isinstance(candidates, (list, tuple)):
-        raise TypeError("candidates must be a list")
-
-    usage_counts = usage_counts or {}
+    if usage_counts is None:
+        usage_counts = {}
 
     spec = TICKET_SPECS[ticket_name]
     metric = spec["metric"]
-    threshold = spec["threshold"]
 
     ranked = []
 
     for candidate in candidates:
-        _validate_market_candidate(candidate)
+        _validate_candidate(candidate)
 
-        match_id = _resolve_match_id(candidate)
+        match_id = _resolve_match_id(
+            candidate
+        )
 
-        current_usage = usage_counts.get(
+        usage_count = usage_counts.get(
             match_id,
             0,
         )
 
-        if current_usage >= MAX_MATCH_USAGE:
+        if usage_count >= MAX_MATCH_USAGE:
             continue
 
-        metric_value = _candidate_metric(
+        base_metric = _candidate_metric(
             candidate,
             metric,
         )
 
-        # Do not include candidates below the ticket's quality threshold.
-        if metric_value < threshold:
-            continue
-
         adjusted_score = (
-            metric_value
+            base_metric
             - (
-                current_usage
+                usage_count
                 * DIVERSITY_PENALTY
             )
         )
@@ -597,42 +477,34 @@ def _rank_candidates_for_ticket(
         ranked.append(
             (
                 adjusted_score,
-                metric_value,
-                match_id,
+                base_metric,
                 candidate,
             )
         )
 
-    # Highest adjusted score first.
-    # match_id is included as a deterministic tie-breaker.
     ranked.sort(
         key=lambda item: (
             item[0],
             item[1],
-            item[2],
         ),
         reverse=True,
     )
 
     return [
-        item[3]
-        for item in ranked
+        candidate
+        for _, _, candidate in ranked
     ]
 
 
-# ============================================================================
-# TICKET BUILDING
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Ticket construction
+# ---------------------------------------------------------------------------
 
 def _build_ticket(
     ticket_name: str,
     candidates: Sequence[dict],
 ) -> Ticket | None:
-    """
-    Build a single ticket.
 
-    A ticket is not forced when fewer than three qualifying selections exist.
-    """
     if ticket_name not in TICKET_SPECS:
         raise ValueError(
             f"unsupported ticket: {ticket_name}"
@@ -644,7 +516,11 @@ def _build_ticket(
     seen_match_ids = set()
 
     for candidate in candidates:
-        match_id = _resolve_match_id(candidate)
+        _validate_candidate(candidate)
+
+        match_id = _resolve_match_id(
+            candidate
+        )
 
         # No duplicate match inside one ticket.
         if match_id in seen_match_ids:
@@ -660,7 +536,7 @@ def _build_ticket(
         if len(selections) >= spec["max_matches"]:
             break
 
-    # Never force a weak/incomplete ticket.
+    # Do not force a weak/short ticket.
     if len(selections) < MIN_SELECTIONS:
         return None
 
@@ -671,21 +547,40 @@ def _build_ticket(
     )
 
 
-# ============================================================================
-# INTERNAL PORTFOLIO BUILDER
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Main smart portfolio builder
+# ---------------------------------------------------------------------------
 
-def _build_portfolio(
-    candidates: Sequence[dict],
+def build_smart_portfolio(
+    candidates: List[dict],
 ) -> List[Ticket]:
     """
-    Shared portfolio construction logic used by both public APIs.
+    Build the four-ticket smart portfolio.
+
+    SAFE       = 40%
+    BALANCED   = 30%
+    AGGRESSIVE = 20%
+    VALUE      = 10%
+
+    Rules:
+        - minimum 3 selections per generated ticket
+        - ticket-specific maximum size
+        - no duplicate match inside a ticket
+        - maximum two appearances of a match across the portfolio
+        - diversity penalty for previously used matches
+        - no forced ticket when insufficient candidates exist
     """
-    if not isinstance(candidates, (list, tuple)):
-        raise TypeError("candidates must be a list")
+
+    if not isinstance(candidates, list):
+        raise TypeError(
+            "candidates must be a list"
+        )
 
     if not candidates:
         return []
+
+    # Strict validation before any processing.
+    _validate_candidates(candidates)
 
     # Never mutate the caller's input.
     available = [
@@ -694,13 +589,18 @@ def _build_portfolio(
     ]
 
     portfolio: List[Ticket] = []
+
+    # Tracks how many tickets each match has already appeared in.
     usage_counts: Dict[str, int] = {}
 
     for ticket_name in TICKET_ORDER:
-        ranked_candidates = _rank_candidates_for_ticket(
-            available,
-            ticket_name,
-            usage_counts,
+
+        ranked_candidates = (
+            _rank_candidates_for_ticket(
+                available,
+                ticket_name,
+                usage_counts,
+            )
         )
 
         ticket = _build_ticket(
@@ -717,79 +617,28 @@ def _build_portfolio(
             match_id = selection.match_id
 
             usage_counts[match_id] = (
-                usage_counts.get(match_id, 0) + 1
+                usage_counts.get(
+                    match_id,
+                    0,
+                )
+                + 1
             )
 
     return portfolio
 
 
-# ============================================================================
-# LEGACY SMART PORTFOLIO API
-# ============================================================================
-
-def build_smart_portfolio(
-    candidates: List[dict],
-) -> List[Ticket]:
-    """
-    Original V1 portfolio API.
-
-    This keeps the original candidate contract expected by
-    tests/test_portfolio.py.
-
-    IMPORTANT:
-    The old candidate format does NOT require a candidate-level
-    'selection' field. It derives selection information from 'market'.
-    """
-    if not isinstance(candidates, list):
-        raise TypeError("candidates must be a list")
-
-    if not candidates:
-        return []
-
-    _validate_legacy_candidates(candidates)
-
-    return _build_portfolio(candidates)
-
-
-# ============================================================================
-# MODERN MARKET PORTFOLIO API
-# ============================================================================
+# ---------------------------------------------------------------------------
+# New market portfolio entry point
+# ---------------------------------------------------------------------------
 
 def build_market_portfolio(
     candidates: List[dict],
 ) -> List[Ticket]:
     """
-    Newer market-aware portfolio API.
+    Current market portfolio entry point.
 
-    Supports both:
-        - old numeric odds
-        - newer dictionary odds
-        - optional candidate-level selection
-        - optional model_probability
-        - optional precomputed confidence
-        - optional match string
+    Kept separate from build_smart_portfolio so older callers continue
+    working while the newer market-specific API remains available.
     """
-    if not isinstance(candidates, list):
-        raise TypeError("candidates must be a list")
 
-    if not candidates:
-        return []
-
-    _validate_market_candidates(candidates)
-
-    return _build_portfolio(candidates)
-
-
-# ============================================================================
-# COMPATIBILITY ALIASES
-# ============================================================================
-
-def build_portfolio(
-    candidates: List[dict],
-) -> List[Ticket]:
-    """
-    Generic compatibility entry point.
-
-    Historically this function referred to the smart portfolio builder.
-    """
     return build_smart_portfolio(candidates)
