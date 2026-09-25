@@ -7,6 +7,13 @@ from pipeline.daily_runner import run_daily_pipeline
 from pipeline.daily_time_guard import filter_upcoming_fixtures
 
 
+NO_BET_RESULT = {
+    "status": "NO_BET",
+    "reason": "insufficient qualifying selections",
+    "tickets": [],
+}
+
+
 def _validate_as_of(as_of: Any) -> None:
     if not isinstance(as_of, datetime):
         raise TypeError(
@@ -19,6 +26,14 @@ def _validate_as_of(as_of: Any) -> None:
         )
 
 
+def _build_no_bet_result() -> dict:
+    return {
+        "status": NO_BET_RESULT["status"],
+        "reason": NO_BET_RESULT["reason"],
+        "tickets": [],
+    }
+
+
 def build_daily_result(
     fixtures: list,
     history: list,
@@ -27,15 +42,15 @@ def build_daily_result(
     """
     Build the daily pipeline result with execution metadata.
 
+    An empty portfolio is converted into an explicit NO_BET
+    result rather than being treated as a ticket or selection.
+
     The result contains:
 
         as_of
         fixtures_received
         upcoming_fixtures
         portfolio
-
-    The portfolio itself is produced by the existing guarded
-    daily runner and is returned unchanged.
     """
     if not isinstance(fixtures, list):
         raise TypeError(
@@ -59,6 +74,9 @@ def build_daily_result(
         history,
         as_of,
     )
+
+    if portfolio == []:
+        portfolio = _build_no_bet_result()
 
     return {
         "as_of": as_of,
