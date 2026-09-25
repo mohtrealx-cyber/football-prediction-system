@@ -107,6 +107,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ) as validator:
+
             result = build_daily_real_portfolio(
                 fixtures,
                 history,
@@ -127,16 +128,21 @@ class DailyRealPortfolioTests(unittest.TestCase):
 
         candidates = self.make_candidates()
 
+        expected_portfolio = {
+            "ticket_count": 4,
+        }
+
         with patch(
             "pipeline.daily_real_portfolio.build_daily_real_candidates",
             return_value=candidates,
         ) as candidate_builder, patch(
             "pipeline.daily_real_portfolio.build_market_portfolio",
-            return_value={"ticket_count": 4},
+            return_value=expected_portfolio,
         ) as portfolio_builder, patch(
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ) as validator:
+
             build_daily_real_portfolio(
                 fixtures,
                 history,
@@ -152,7 +158,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
         )
 
         validator.assert_called_once_with(
-            {"ticket_count": 4}
+            expected_portfolio
         )
 
     def test_fixture_and_history_are_not_modified(self):
@@ -163,7 +169,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
         original_history = list(history)
 
         expected_portfolio = {
-            "ticket_count": 4
+            "ticket_count": 4,
         }
 
         with patch(
@@ -176,6 +182,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ):
+
             build_daily_real_portfolio(
                 fixtures,
                 history,
@@ -196,7 +203,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
         history = self.make_history()
 
         expected_portfolio = {
-            "ticket_count": 0
+            "ticket_count": 0,
         }
 
         with patch(
@@ -209,6 +216,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ) as validator:
+
             result = build_daily_real_portfolio(
                 fixtures,
                 history,
@@ -246,6 +254,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ) as validator:
+
             result = build_daily_real_portfolio(
                 fixtures,
                 history,
@@ -265,9 +274,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             [],
         )
 
-        validator.assert_called_once_with(
-            []
-        )
+        validator.assert_not_called()
 
     def test_non_list_fixtures_are_rejected(self):
         history = self.make_history()
@@ -324,6 +331,7 @@ class DailyRealPortfolioTests(unittest.TestCase):
             "pipeline.daily_real_portfolio.validate_daily_portfolio",
             return_value=True,
         ) as validator:
+
             result = build_daily_real_portfolio(
                 fixtures,
                 history,
