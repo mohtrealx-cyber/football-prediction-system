@@ -1,226 +1,395 @@
-from typing import Dict, List
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
 
 from tickets.builder import Selection, Ticket
 
 
 MAX_MATCH_USAGE = 2
+DIVERSITY_PENALTY = 6.0
 
-
-TICKET_PROFILES = (
-    {
-        "name": "SAFE",
-        "stake": 40.0,
-        "minimum": 3,
-        "preferred": 3,
-        "maximum": 4,
+TICKET_PROFILES = {
+    "SAFE": {
+        "stake_percent": 40.0,
+        "preferred_count": 3,
+        "max_count": 4,
         "metric": "score",
     },
-    {
-        "name": "BALANCED",
-        "stake": 30.0,
-        "minimum": 3,
-        "preferred": 4,
-        "maximum": 5,
+    "BALANCED": {
+        "stake_percent": 30.0,
+        "preferred_count": 4,
+        "max_count": 5,
         "metric": "score",
     },
-    {
-        "name": "AGGRESSIVE",
-        "stake": 20.0,
-        "minimum": 3,
-        "preferred": 5,
-        "maximum": 6,
+    "AGGRESSIVE": {
+        "stake_percent": 20.0,
+        "preferred_count": 5,
+        "max_count": 6,
         "metric": "score",
     },
-    {
-        "name": "VALUE",
-        "stake": 10.0,
-        "minimum": 3,
-        "preferred": 4,
-        "maximum": 5,
+    "VALUE": {
+        "stake_percent": 10.0,
+        "preferred_count": 4,
+        "max_count": 5,
         "metric": "value_edge",
     },
-)
+}
 
 
-def _candidate_to_selection(candidate: Dict) -> Selection:
-    required = {
+def _validate_candidates(
+    candidates: Any,
+) -> None:
+    if not isinstance(candidates, list):
+        raise TypeError(
+            "candidates must be a list"
+        )
+
+
+def _candidate_to_selection(
+    candidate: dict,
+) -> Selection:
+    required_fields = (
         "match_id",
         "home_team",
         "away_team",
         "market",
+        "selection",
         "odds",
-        "model_probability",
-        "value_edge",
-    }
+        "score",
+    )
 
-    missing = required - candidate.keys()
+    missing_fields = [
+        field
+        for field in required_fields
+        if field not in candidate
+    ]
 
-    if missing:
+    if missing_fields:
         raise ValueError(
-            f"Candidate is missing fields: {sorted(missing)}"
+            f"Candidate is missing fields: {missing_fields}"
+        )
+
+    odds_value = candidate.get(
+        "selected_odds"
+    )
+
+    if odds_value is None:
+        odds_value = candidate.get(
+            "odds"
+        )
+
+    # Real daily candidates preserve the complete market-odds
+    # dictionary under "odds". The actual price for the selected
+    # market is carried separately in "selected_odds".
+    if isinstance(
+        odds_value,
+        dict,
+    ):
+        market = candidate["market"]
+
+        if market not in odds_value:
+            raise ValueError(
+                "Candidate odds are missing market: "
+                f"{market}"
+            )
+
+        odds_value = odds_value[market]
+
+    if not isinstance(
+        odds_value,
+        (int, float),
+    ):
+        raise TypeError(
+            "Candidate selected odds must be numeric"
         )
 
     return Selection(
         match_id=candidate["match_id"],
-        match=(
-            f'{candidate["home_team"]} '
-            f'vs {candidate["away_team"]}'
-        ),
+        home_team=candidate["home_team"],
+        away_team=candidate["away_team"],
         market=candidate["market"],
-        odds=candidate["odds"],
-        confidence=candidate["model_probability"] * 100,
-        value_edge=candidate["value_edge"],
+        selection=candidate["selection"],
+        odds=float(odds_value),
+        score=float(candidate["score"]),
     )
 
 
-def _rank_candidate(
-    candidate: Dict,
+def _candidate_metric(
+    candidate: dict,
     metric: str,
-    usage_count: int,
 ) -> float:
-    """
-    Calculate a temporary ranking score.
+    value = candidate.get(
+        metric,
+        0.0,
+    )
 
-    Reusing a match costs points so the four
-    tickets become more different.
-    """
-
-    if metric == "score":
-        base_score = candidate.get("score", 0.0)
-
-    elif metric == "value_edge":
-        base_score = candidate.get("value_edge", 0.0) * 5.0
-
-    else:
-        raise ValueError(
-            f"Unsupported ranking metric: {metric}"
+    if not isinstance(
+        value,
+        (int, float),
+    ):
+        raise TypeError(
+            f"candidate {metric} must be numeric"
         )
 
-    diversity_penalty = usage_count * 6.0
-
-    return base_score - diversity_penalty
+    return float(value)
 
 
-def _choose_candidates(
-    candidates: List[Dict],
-    metric: str,
-    usage: Dict[str, int],
-    minimum: int,
-    preferred: int,
-    maximum: int,
-) -> List[Dict]:
-    """
-    Choose candidates while limiting repeated matches.
+def _selection_match_id(
+    selection: Selection,
+) -> str:
+    return str(
+        selection.match_id
+    )
 
-    A match can appear in at most two tickets.
-    """
+
+def _rank_candidates_for_ticket(
+    candidates: list[dict],
+    ticket_name: str,
+    match_usage: Counter,
+) -> list[dict]:
+    profile = TICKET_PROFILES[
+        ticket_name
+    ]
+
+    metric = profile["metric"]
 
     ranked = []
 
     for candidate in candidates:
-        match_id = candidate["match_id"]
+        match_id = str(
+            candidate["match_id"]
+        )
 
-        if usage.get(match_id, 0) >= MAX_MATCH_USAGE:
+        usage_count = match_usage.get(
+            match_id,
+            0,
+        )
+
+        if usage_count >= MAX_MATCH_USAGE:
             continue
 
-        ranking = _rank_candidate(
+        base_score = _candidate_metric(
             candidate,
             metric,
-            usage.get(match_id, 0),
+        )
+
+        diversity_penalty = (
+            usage_count
+            * DIVERSITY_PENALTY
+        )
+
+        adjusted_score = (
+            base_score
+            - diversity_penalty
         )
 
         ranked.append(
-            (ranking, candidate)
+            (
+                adjusted_score,
+                base_score,
+                candidate,
+            )
         )
 
     ranked.sort(
-        key=lambda item: item[0],
-        reverse=True,
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            str(
+                item[2]["match_id"]
+            ),
+            item[2]["market"],
+            item[2]["selection"],
+        )
     )
 
-    chosen = []
+    return [
+        item[2]
+        for item in ranked
+    ]
 
-    for _, candidate in ranked:
-        chosen.append(candidate)
 
-        if len(chosen) >= preferred:
+def _select_for_ticket(
+    candidates: list[dict],
+    ticket_name: str,
+    match_usage: Counter,
+) -> list[Selection]:
+    profile = TICKET_PROFILES[
+        ticket_name
+    ]
+
+    preferred_count = profile[
+        "preferred_count"
+    ]
+
+    max_count = profile[
+        "max_count"
+    ]
+
+    ranked_candidates = (
+        _rank_candidates_for_ticket(
+            candidates=candidates,
+            ticket_name=ticket_name,
+            match_usage=match_usage,
+        )
+    )
+
+    selections: list[Selection] = []
+
+    used_match_ids: set[str] = set()
+
+    for candidate in ranked_candidates:
+        match_id = str(
+            candidate["match_id"]
+        )
+
+        if match_id in used_match_ids:
+            continue
+
+        selection = _candidate_to_selection(
+            candidate
+        )
+
+        selection.validate()
+
+        selections.append(
+            selection
+        )
+
+        used_match_ids.add(
+            match_id
+        )
+
+        if len(selections) >= max_count:
             break
 
-    # If the preferred size cannot be reached,
-    # try the minimum before giving up.
-    if len(chosen) < minimum:
+    # Never force weak selections. A ticket can only be created
+    # when it has the required minimum of three selections.
+    if len(selections) < 3:
         return []
 
-    return chosen[:maximum]
+    # Prefer the configured ticket size when enough valid,
+    # independent matches are available.
+    if len(selections) > preferred_count:
+        selections = selections[
+            :preferred_count
+        ]
+
+    return selections
+
+
+def _build_ticket(
+    ticket_name: str,
+    selections: list[Selection],
+) -> Ticket:
+    profile = TICKET_PROFILES[
+        ticket_name
+    ]
+
+    ticket = Ticket(
+        name=ticket_name,
+        stake_percent=profile[
+            "stake_percent"
+        ],
+        selections=selections,
+    )
+
+    ticket.validate()
+
+    return ticket
 
 
 def build_smart_portfolio(
-    candidates: List[Dict],
-) -> List[Ticket]:
+    candidates: list[dict],
+) -> list[Ticket]:
     """
-    Build four different tickets.
+    Build the four-ticket football portfolio.
 
     Rules:
-    - 40% / 30% / 20% / 10%
-    - Minimum 3 selections per ticket
-    - Maximum 6 selections
-    - A match can appear in at most 2 tickets
-    - No forced weak selection
+    - SAFE: 40%
+    - BALANCED: 30%
+    - AGGRESSIVE: 20%
+    - VALUE: 10%
+    - minimum 3 selections per ticket
+    - maximum 6 selections per ticket
+    - no duplicate match inside a ticket
+    - maximum match reuse across portfolio: 2
+    - never force a ticket with fewer than 3 selections
     """
+
+    _validate_candidates(
+        candidates
+    )
 
     if not candidates:
         return []
 
-    # Validate candidates and remove duplicate match IDs.
-    cleaned = []
-    seen_matches = set()
+    working_candidates = []
 
     for candidate in candidates:
-
-        selection = _candidate_to_selection(candidate)
-        selection.validate()
-
-        match_id = candidate["match_id"]
-
-        if match_id in seen_matches:
-            continue
-
-        seen_matches.add(match_id)
-        cleaned.append(candidate)
-
-    usage: Dict[str, int] = {}
-    tickets: List[Ticket] = []
-
-    for profile in TICKET_PROFILES:
-
-        chosen = _choose_candidates(
-            candidates=cleaned,
-            metric=profile["metric"],
-            usage=usage,
-            minimum=profile["minimum"],
-            preferred=profile["preferred"],
-            maximum=profile["maximum"],
-        )
-
-        if len(chosen) < profile["minimum"]:
-            # Do not force a ticket.
-            continue
-
-        selections = [
-            _candidate_to_selection(candidate)
-            for candidate in chosen
-        ]
-
-        for candidate in chosen:
-            match_id = candidate["match_id"]
-            usage[match_id] = usage.get(match_id, 0) + 1
-
-        tickets.append(
-            Ticket(
-                name=profile["name"],
-                stake_percent=profile["stake"],
-                selections=selections,
+        if not isinstance(
+            candidate,
+            dict,
+        ):
+            raise TypeError(
+                "each candidate must be a dictionary"
             )
+
+        if candidate.get(
+            "qualified"
+        ) is False:
+            continue
+
+        working_candidates.append(
+            dict(candidate)
         )
 
-    return tickets
+    if not working_candidates:
+        return []
+
+    portfolio: list[Ticket] = []
+
+    match_usage: Counter = Counter()
+
+    for ticket_name in (
+        "SAFE",
+        "BALANCED",
+        "AGGRESSIVE",
+        "VALUE",
+    ):
+        selections = _select_for_ticket(
+            candidates=working_candidates,
+            ticket_name=ticket_name,
+            match_usage=match_usage,
+        )
+
+        if len(selections) < 3:
+            # No forced ticket.
+            continue
+
+        ticket = _build_ticket(
+            ticket_name=ticket_name,
+            selections=selections,
+        )
+
+        portfolio.append(
+            ticket
+        )
+
+        for selection in selections:
+            match_usage[
+                _selection_match_id(
+                    selection
+                )
+            ] += 1
+
+    return portfolio
+
+
+__all__ = [
+    "MAX_MATCH_USAGE",
+    "DIVERSITY_PENALTY",
+    "TICKET_PROFILES",
+    "build_smart_portfolio",
+]
