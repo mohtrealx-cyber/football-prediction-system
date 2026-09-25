@@ -62,13 +62,12 @@ def _candidate_selection_name(
     candidate: dict,
 ) -> str:
     """
-    Resolve a selection name only for deterministic sorting.
+    Return a selection label for deterministic sorting.
 
-    New daily candidates normally contain "selection".
-    Legacy candidates may omit it.
+    New candidates may already contain "selection".
 
-    Known markets use their normalized selection label.
-    Unknown/legacy markets fall back to the market name.
+    Older candidates may not contain it, so the market name
+    is used as a safe fallback.
     """
 
     selection_value = candidate.get(
@@ -101,17 +100,16 @@ def _resolve_candidate_odds(
     """
     Resolve the numeric odds used by Selection.
 
-    Supported candidate formats:
+    Supported formats:
 
-    New daily-real format:
+    New daily-real candidate:
         odds = {
             "home_win": 1.80,
-            "draw": 3.50,
             ...
         }
         selected_odds = 1.80
 
-    Legacy format:
+    Legacy candidate:
         odds = 1.80
     """
 
@@ -164,14 +162,12 @@ def _candidate_to_selection(
         home_team
         away_team
         selection
-
-    is retained at candidate level.
-
-    The project's Selection constructor accepts:
-        match_id
-        market
-        odds
         score
+
+    remains at candidate level.
+
+    Selection is constructed only with the fields supported
+    by tickets.builder.Selection.
     """
 
     required_fields = (
@@ -202,9 +198,6 @@ def _candidate_to_selection(
         match_id=candidate["match_id"],
         market=candidate["market"],
         odds=odds_value,
-        score=float(
-            candidate["score"]
-        ),
     )
 
 
@@ -348,7 +341,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # No duplicate match inside a ticket.
+        # Never repeat a match within one ticket.
         if match_id in used_match_ids:
             continue
 
@@ -369,7 +362,7 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force a weak/incomplete ticket.
+    # Never force a ticket with fewer than three valid matches.
     if len(selections) < 3:
         return []
 
