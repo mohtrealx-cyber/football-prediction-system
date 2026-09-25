@@ -62,13 +62,12 @@ def _candidate_selection_name(
     candidate: dict,
 ) -> str:
     """
-    Resolve a selection name for deterministic sorting.
+    Resolve a selection label for deterministic sorting.
 
     Newer candidates normally contain "selection".
 
-    Older candidates may omit "selection", so the known
-    market mapping is used. Unknown legacy markets fall back
-    to the market name itself.
+    Older candidates may not contain it, so the market
+    name is used as a fallback.
     """
 
     selection_value = candidate.get(
@@ -101,16 +100,18 @@ def _resolve_candidate_odds(
     """
     Resolve the numeric odds for the selected market.
 
-    Supports both candidate formats.
+    Supported formats:
 
-    Daily-real:
+    Daily-real candidate:
         odds = {
             "home_win": 1.80,
-            ...
+            "draw": 3.50,
+            "away_win": 4.50,
         }
+
         selected_odds = 1.80
 
-    Older candidates:
+    Legacy candidate:
         odds = 1.80
     """
 
@@ -127,7 +128,9 @@ def _resolve_candidate_odds(
         odds_value,
         dict,
     ):
-        market = candidate["market"]
+        market = str(
+            candidate["market"]
+        )
 
         if market not in odds_value:
             raise ValueError(
@@ -156,12 +159,12 @@ def _resolve_confidence(
     candidate: dict,
 ) -> float:
     """
-    Resolve Selection.confidence.
+    Resolve the confidence required by Selection.
 
     Priority:
     1. Explicit candidate confidence.
     2. model_probability converted from 0-1 to 0-100.
-    3. Candidate score as a legacy fallback.
+    3. score as a legacy fallback.
     """
 
     confidence = candidate.get(
@@ -213,11 +216,11 @@ def _resolve_value_edge(
     candidate: dict,
 ) -> float:
     """
-    Resolve Selection.value_edge.
+    Resolve the value edge required by Selection.
 
     Daily-real candidates provide value_edge directly.
 
-    Older candidates that do not provide it use 0.0.
+    Legacy candidates without value_edge receive 0.0.
     """
 
     value_edge = candidate.get(
@@ -233,15 +236,9 @@ def _resolve_value_edge(
             "Candidate value_edge must be numeric"
         )
 
-    value_edge = float(
+    return float(
         value_edge
     )
-
-    # Selection.validate() requires value_edge >= 0.
-    if value_edge < 0.0:
-        value_edge = 0.0
-
-    return value_edge
 
 
 def _resolve_match(
@@ -249,7 +246,26 @@ def _resolve_match(
 ) -> str:
     """
     Build the human-readable match string required by Selection.
+
+    Preferred format:
+        Home Team vs Away Team
+
+    Legacy candidates that do not contain team names may provide
+    a direct "match" field.
+
+    Final fallback:
+        match_id
     """
+
+    direct_match = candidate.get(
+        "match"
+    )
+
+    if isinstance(
+        direct_match,
+        str,
+    ) and direct_match.strip():
+        return direct_match.strip()
 
     home_team = candidate.get(
         "home_team"
@@ -259,36 +275,46 @@ def _resolve_match(
         "away_team"
     )
 
-    if not isinstance(
-        home_team,
-        str,
-    ) or not home_team.strip():
-        raise ValueError(
-            "Candidate home_team cannot be empty"
+    if (
+        isinstance(home_team, str)
+        and home_team.strip()
+        and isinstance(away_team, str)
+        and away_team.strip()
+    ):
+        return (
+            f"{home_team.strip()} vs "
+            f"{away_team.strip()}"
         )
 
-    if not isinstance(
-        away_team,
-        str,
-    ) or not away_team.strip():
-        raise ValueError(
-            "Candidate away_team cannot be empty"
-        )
-
-    return (
-        f"{home_team.strip()} vs "
-        f"{away_team.strip()}"
+    match_id = candidate.get(
+        "match_id"
     )
+
+    if match_id is None:
+        raise ValueError(
+            "Candidate cannot provide a match description"
+        )
+
+    match = str(
+        match_id
+    ).strip()
+
+    if not match:
+        raise ValueError(
+            "Candidate match cannot be empty"
+        )
+
+    return match
 
 
 def _candidate_to_selection(
     candidate: dict,
 ) -> Selection:
     """
-    Convert a candidate dictionary into the project's
+    Convert one candidate dictionary into the project's
     actual Selection dataclass.
 
-    Selection requires:
+    Actual Selection fields:
 
         match_id
         match
@@ -296,23 +322,10 @@ def _candidate_to_selection(
         odds
         confidence
         value_edge
-
-    The candidate may contain additional fields such as:
-
-        home_team
-        away_team
-        selection
-        score
-        model_probability
-        selected_odds
-
-    Those are used to construct the required Selection fields.
     """
 
     required_fields = (
         "match_id",
-        "home_team",
-        "away_team",
         "market",
         "odds",
         "score",
@@ -329,7 +342,19 @@ def _candidate_to_selection(
             f"Candidate is missing fields: {missing_fields}"
         )
 
-    odds_value = _resolve_candidate_odds(
+    match_id = str(
+        candidate["match_id"]
+    )
+
+    market = str(
+        candidate["market"]
+    )
+
+    match = _resolve_match(
+        candidate
+    )
+
+    odds = _resolve_candidate_odds(
         candidate
     )
 
@@ -341,19 +366,11 @@ def _candidate_to_selection(
         candidate
     )
 
-    match = _resolve_match(
-        candidate
-    )
-
     selection = Selection(
-        match_id=str(
-            candidate["match_id"]
-        ),
+        match_id=match_id,
         match=match,
-        market=str(
-            candidate["market"]
-        ),
-        odds=odds_value,
+        market=market,
+        odds=odds,
         confidence=confidence,
         value_edge=value_edge,
     )
@@ -449,7 +466,10 @@ def _rank_candidates_for_ticket(
             -item[0],
             -item[1],
             str(
-                item[2]["match_id"]
+                item[2].get(
+                    "match_id",
+                    "",
+                )
             ),
             str(
                 item[2].get(
@@ -503,7 +523,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # Prevent duplicate matches inside one ticket.
+        # No duplicate match inside one ticket.
         if match_id in used_match_ids:
             continue
 
@@ -522,11 +542,11 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force an incomplete ticket.
+    # Never force a ticket with fewer than 3 selections.
     if len(selections) < 3:
         return []
 
-    # Use the configured preferred ticket size.
+    # Keep the configured preferred ticket size.
     if len(selections) > preferred_count:
         selections = selections[
             :preferred_count
@@ -543,22 +563,13 @@ def _build_ticket(
         ticket_name
     ]
 
-    ticket = Ticket(
+    return Ticket(
         name=ticket_name,
         stake_percent=profile[
             "stake_percent"
         ],
         selections=selections,
     )
-
-    ticket.validate_tickets(
-        [ticket]
-    ) if hasattr(
-        ticket,
-        "validate_tickets",
-    ) else None
-
-    return ticket
 
 
 def build_smart_portfolio(
@@ -627,7 +638,7 @@ def build_smart_portfolio(
         )
 
         if len(selections) < 3:
-            # Do not force a ticket.
+            # Do not force an incomplete ticket.
             continue
 
         ticket = _build_ticket(
