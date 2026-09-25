@@ -1,4 +1,5 @@
 from performance.engine import calculate_performance
+from performance.streaks import calculate_streaks
 
 
 SUPPORTED_TICKETS = {
@@ -11,20 +12,11 @@ SUPPORTED_TICKETS = {
 
 def calculate_ticket_performance(results: dict) -> dict:
     """
-    Calculate performance separately for the four ticket types.
+    Calculate performance separately for each ticket.
 
-    Expected input:
-
-        {
-            "SAFE": [...],
-            "BALANCED": [...],
-            "AGGRESSIVE": [...],
-            "VALUE": [...]
-        }
-
-    Each ticket contains its historical ticket results.
-
-    Returns one performance summary per ticket.
+    Each ticket receives:
+    - the existing performance metrics
+    - streak statistics
     """
 
     if not isinstance(results, dict):
@@ -33,17 +25,15 @@ def calculate_ticket_performance(results: dict) -> dict:
     provided_tickets = set(results.keys())
 
     unknown_tickets = provided_tickets - SUPPORTED_TICKETS
-
     if unknown_tickets:
         raise ValueError(
-            f"Unsupported ticket(s): {sorted(unknown_tickets)}"
+            f"unknown tickets: {sorted(unknown_tickets)}"
         )
 
     missing_tickets = SUPPORTED_TICKETS - provided_tickets
-
     if missing_tickets:
         raise ValueError(
-            f"Missing ticket(s): {sorted(missing_tickets)}"
+            f"missing tickets: {sorted(missing_tickets)}"
         )
 
     performance_by_ticket = {}
@@ -58,16 +48,22 @@ def calculate_ticket_performance(results: dict) -> dict:
 
         if not isinstance(ticket_results, list):
             raise TypeError(
-                f"Results for {ticket_name} must be a list"
+                f"results for ticket '{ticket_name}' must be a list"
             )
 
         try:
             performance = calculate_performance(ticket_results)
+            streaks = calculate_streaks(ticket_results)
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                f"Invalid results for ticket {ticket_name}: {exc}"
+                f"invalid results for ticket '{ticket_name}'"
             ) from exc
 
-        performance_by_ticket[ticket_name] = performance
+        # Preserve all existing performance metrics and add
+        # ticket-level streak statistics.
+        performance_by_ticket[ticket_name] = {
+            **performance,
+            "streaks": streaks,
+        }
 
     return performance_by_ticket
