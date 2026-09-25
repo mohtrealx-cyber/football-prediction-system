@@ -62,14 +62,13 @@ def _candidate_selection_name(
     candidate: dict,
 ) -> str:
     """
-    Return the selection name used for deterministic sorting.
+    Resolve a selection name only for deterministic sorting.
 
-    Newer candidates normally contain an explicit
-    "selection" field.
+    New daily candidates normally contain "selection".
+    Legacy candidates may omit it.
 
-    Older candidates may omit it. In that case:
-    - normalized markets use their standard selection label
-    - legacy markets such as 1X use the market name itself
+    Known markets use their normalized selection label.
+    Unknown/legacy markets fall back to the market name.
     """
 
     selection_value = candidate.get(
@@ -96,59 +95,23 @@ def _candidate_selection_name(
     )
 
 
-def _resolve_candidate_selection(
-    candidate: dict,
-) -> str:
-    """
-    Resolve the selection label.
-
-    Priority:
-    1. Explicit candidate["selection"]
-    2. Known normalized market mapping
-    3. Legacy/custom market name itself
-    """
-
-    selection_value = candidate.get(
-        "selection"
-    )
-
-    if selection_value is not None:
-        return str(
-            selection_value
-        )
-
-    market = str(
-        candidate["market"]
-    )
-
-    normalized_selection = MARKET_SELECTIONS.get(
-        market
-    )
-
-    if normalized_selection is not None:
-        return normalized_selection
-
-    # Preserve legacy/custom markets such as:
-    # 1X, X2, 12, etc.
-    return market
-
-
 def _resolve_candidate_odds(
     candidate: dict,
 ) -> float:
     """
-    Resolve numeric odds for the selected market.
+    Resolve the numeric odds used by Selection.
 
-    Supported formats:
+    Supported candidate formats:
 
-    New daily-real candidate:
+    New daily-real format:
         odds = {
             "home_win": 1.80,
+            "draw": 3.50,
             ...
         }
         selected_odds = 1.80
 
-    Older candidate:
+    Legacy format:
         odds = 1.80
     """
 
@@ -194,14 +157,21 @@ def _candidate_to_selection(
     candidate: dict,
 ) -> Selection:
     """
-    Convert a candidate dictionary into a Selection object.
+    Convert a candidate dictionary into the project's
+    Selection object.
 
-    Important:
-    Candidate objects contain home_team and away_team,
-    but the project's Selection constructor does not.
+    Candidate metadata such as:
+        home_team
+        away_team
+        selection
 
-    Therefore those fields are validated here but are NOT
-    passed to Selection().
+    is retained at candidate level.
+
+    The project's Selection constructor accepts:
+        match_id
+        market
+        odds
+        score
     """
 
     required_fields = (
@@ -224,22 +194,13 @@ def _candidate_to_selection(
             f"Candidate is missing fields: {missing_fields}"
         )
 
-    selection_value = (
-        _resolve_candidate_selection(
-            candidate
-        )
-    )
-
-    odds_value = (
-        _resolve_candidate_odds(
-            candidate
-        )
+    odds_value = _resolve_candidate_odds(
+        candidate
     )
 
     return Selection(
         match_id=candidate["match_id"],
         market=candidate["market"],
-        selection=selection_value,
         odds=odds_value,
         score=float(
             candidate["score"]
@@ -387,7 +348,7 @@ def _select_for_ticket(
             candidate["match_id"]
         )
 
-        # Never repeat the same match inside one ticket.
+        # No duplicate match inside a ticket.
         if match_id in used_match_ids:
             continue
 
@@ -408,8 +369,7 @@ def _select_for_ticket(
         if len(selections) >= max_count:
             break
 
-    # Never force weak selections.
-    # A ticket needs at least three selections.
+    # Never force a weak/incomplete ticket.
     if len(selections) < 3:
         return []
 
