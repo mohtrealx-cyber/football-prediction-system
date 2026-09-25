@@ -1,5 +1,6 @@
 import copy
 import unittest
+from dataclasses import replace
 
 from portfolio.market_portfolio import build_market_portfolio
 from portfolio.daily_validator import validate_daily_portfolio
@@ -210,12 +211,14 @@ class DailyTicketValidationTests(unittest.TestCase):
     def test_empty_ticket_is_allowed_when_no_selection_exists(self):
         candidates = [
             make_candidate(index)
-            for index in range(1, 3)
+            for index in range(1, 13)
         ]
 
         portfolio = build_market_portfolio(
             candidates
         )
+
+        portfolio[0].selections = []
 
         result = validate_daily_portfolio(
             portfolio
@@ -236,7 +239,18 @@ class DailyTicketValidationTests(unittest.TestCase):
             candidates
         )
 
-        portfolio[0].selections[0].qualified = False
+        original_selection = (
+            portfolio[0].selections[0]
+        )
+
+        unqualified_selection = replace(
+            original_selection,
+            qualified=False,
+        )
+
+        portfolio[0].selections[0] = (
+            unqualified_selection
+        )
 
         with self.assertRaises(ValueError):
             validate_daily_portfolio(
