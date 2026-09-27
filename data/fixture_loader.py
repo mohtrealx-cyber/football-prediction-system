@@ -1,23 +1,43 @@
-from datetime import date
-
-from data.api_fixture_provider import APIFixtureProvider
+from data.fixture_provider import FixtureDataProvider
+from data.football_data_client import download_fixtures
 
 
 def load_fixtures(
-    destination_path: str | None = None,
-    url: str | None = None,
+    destination_path: str,
+    url: str = None,
     timeout: int = 30,
-    fixture_date: date | None = None,
 ):
     """
-    Load fixtures from API-Football.
+    Download the latest fixture CSV and convert it into Match objects.
 
-    destination_path, url and timeout are retained for
-    backwards compatibility with the previous CSV loader.
+    The downloader is imported into this module intentionally so that
+    callers/tests can patch data.fixture_loader.download_fixtures.
     """
 
-    provider = APIFixtureProvider()
+    if not isinstance(destination_path, str):
+        raise TypeError(
+            "destination_path must be a string"
+        )
 
-    return provider.get_matches(
-        fixture_date=fixture_date,
+    if not destination_path.strip():
+        raise ValueError(
+            "destination_path must be a non-empty string"
+        )
+
+    if url is None:
+        download_fixtures(
+            destination_path=destination_path,
+            timeout=timeout,
+        )
+    else:
+        download_fixtures(
+            destination_path=destination_path,
+            url=url,
+            timeout=timeout,
+        )
+
+    provider = FixtureDataProvider(
+        destination_path
     )
+
+    return provider.get_matches()
