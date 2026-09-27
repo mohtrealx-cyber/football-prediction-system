@@ -2,19 +2,323 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 
 API_BASE_URL = "https://v3.football.api-sports.io"
-
 KENYA_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 
+class APIFootballError(RuntimeError):
+    """Raised when API-Football returns an API-level error."""
+
+
+class APIFootballClient:
+    """Client for retrieving football fixtures from API-Football."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str = API_BASE_URL,
+        timeout: int = 30,
+    ):
+        if api_key is None:
+            api_key = os.getenv(
+                "API_FOOTBALL_KEY",
+                "",
+            )
+
+        api_key = api_key.strip()
+
+        if not api_key:
+            raise ValueError(
+                "API_FOOTBALL_KEY is required"
+            )
+
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ValueError(
+                "base_url must be a non-empty string"
+            )
+
+        if (
+            not isinstance(timeout, int)
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
+            raise ValueError(
+                "timeout must be a positive integer"
+            )
+
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def get_fixtures(
+        self,
+        fixture_date: date,
+    ) -> list[dict]:
+        """Return fixtures for a specific calendar date."""
+
+        if not isinstance(fixture_date, date):
+            raise ValueError(
+                "fixture_date must be a date"
+            )
+
+        query = urlencode(
+            {
+                "date": fixture_date.isoformat(),
+                "timezone": "Africa/Nairobi",
+            }
+        )
+
+        url = (
+            f"{self.base_url}/fixtures?"
+            f"{query}"
+        )
+
+        request = Request(
+            url,
+            headers={
+                "x-apisports-key": self.api_key,
+                "Accept": "application/json",
+                "User-Agent": (
+                    "football-prediction-system/1.0"
+                ),
+            },
+            method="GET",
+        )
+
+        try:
+            with urlopen(
+                request,
+                timeout=self.timeout,
+            ) as response:
+                raw_data = response.read()
+
+        except Exception as exc:
+            raise APIFootballError(
+                f"API-Football request failed: {exc}"
+            ) from exc
+
+        try:
+            data = json.loads(
+                raw_data.decode("utf-8")
+            )
+
+        except (
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise APIFootballError(
+                "API-Football returned invalid JSON"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise APIFootballError(
+                "API-Football response must be a JSON object"
+            )
+
+        errors = data.get("errors")
+
+        if errors:
+            raise APIFootballError(
+                f"API-Football returned errors: {errors}"
+            )
+
+        response_data = data.get("response")
+
+        if not isinstance(response_data, list):
+            raise APIFootballError(
+                "API-Football response field "
+                "'response' must be a list"
+            )
+
+        return response_data
+
+    def get_fixtures_range(
+        self,
+        start_date: date,
+        days_ahead: int = 1,
+    ) -> list[dict]:
+        """Return fixtures for start_date and following days."""
+
+        if not isinstance(start_date, date):
+            raise ValueError(
+                "start_date must be a date"
+            )
+
+        if (
+            not isinstance(days_ahead, int)
+            or isinstance(days_ahead, bool)
+            or days_ahead < 0
+        ):
+            raise ValueError(
+                "days_ahead must be a non-negative integer"
+            )
+
+        fixtures = []
+
+        for offset in range(days_ahead + 1):
+            target_date = (
+                start_date
+                + timedelta(days=offset)
+            )
+
+            fixtures.extend(
+                self.get_fixtures(
+                    fixture_date=target_date
+                )
+            )
+
+        return fixtures
+
+    @staticmethod
+    def convert_fixture(
+        fixture: dict,
+    ) -> dict:
+        """Convert an API-Football fixture into project format."""
+
+        fixture_data = (
+            fixture.get("fixture") or {}
+        )
+        league_data = (
+            fixture.get("league") or {}
+        )
+        teams = (
+            fixture.get("teams") or {}
+        )
+
+        home = teams.get("home") or {}
+        away = teams.get("away") or {}
+
+        fixture_id = fixture_data.get("id")
+        kickoff_text = fixture_data.get("date")
+
+        if fixture_id is None:
+            raise ValueError(
+                "API-Football fixture is missing fixture ID"
+            )
+
+        if not kickoff_text:
+            raise ValueError(
+                f"Fixture {fixture_id} is missing kickoff time"
+            )
+
+        if not home.get("name") or not away.get("name"):
+            raise ValueError(
+                f"Fixture {fixture_id} is missing team information"
+            )
+
+        if not league_data.get("name"):
+            raise ValueError(
+                f"Fixture {fixture_id} is missing league information"
+            )
+
+        try:
+            kickoff = datetime.fromisoformat(
+                kickoff_text.replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid kickoff time for fixture "
+                f"{fixture_id}: {kickoff_text}"
+            ) from exc
+
+        kickoff = kickoff.astimezone(
+            KENYA_TIMEZONE
+        )
+
+        status_data = (
+            fixture_data.get("status") or {}
+        )
+
+        status_short = status_data.get(
+            "short",
+            "",
+        )
+
+        if status_short in {
+            "NS",
+            "TBD",
+            "PST",
+        }:
+            status = "scheduled"
+
+        elif status_short in {
+            "1H",
+            "HT",
+            "2H",
+            "ET",
+            "BT",
+            "P",
+            "LIVE",
+        }:
+            status = "live"
+
+        else:
+            status = "finished"
+
+        return {
+            "match_id": str(fixture_id),
+            "home_team": home["name"].strip(),
+            "away_team": away["name"].strip(),
+            "league": league_data["name"].strip(),
+            "kickoff": kickoff,
+            "status": status,
+            "odds": {
+                "home_win": 2.00,
+                "draw": 3.40,
+                "away_win": 3.80,
+            },
+        }
+
+    def get_converted_fixtures(
+        self,
+        fixture_date: date,
+    ) -> list[dict]:
+        """Get fixtures and convert them to project format."""
+
+        fixtures = self.get_fixtures(
+            fixture_date=fixture_date
+        )
+
+        return [
+            self.convert_fixture(fixture)
+            for fixture in fixtures
+        ]
+
+    def get_converted_fixture_range(
+        self,
+        start_date: date,
+        days_ahead: int = 1,
+    ) -> list[dict]:
+        """Get and convert fixtures over multiple days."""
+
+        fixtures = self.get_fixtures_range(
+            start_date=start_date,
+            days_ahead=days_ahead,
+        )
+
+        return [
+            self.convert_fixture(fixture)
+            for fixture in fixtures
+        ]
+
+
 def _get_api_key() -> str:
-    api_key = os.getenv("API_FOOTBALL_KEY", "").strip()
+    """Backward-compatible environment API-key helper."""
+
+    api_key = os.getenv(
+        "API_FOOTBALL_KEY",
+        "",
+    ).strip()
 
     if not api_key:
         raise RuntimeError(
@@ -28,80 +332,29 @@ def _request_fixtures(
     date_text: str,
     timeout: int = 30,
 ) -> list[dict]:
-    api_key = _get_api_key()
-
-    query = urlencode(
-        {
-            "date": date_text,
-            "timezone": "Africa/Nairobi",
-        }
-    )
-
-    url = f"{API_BASE_URL}/fixtures?{query}"
-
-    request = Request(
-        url,
-        headers={
-            "x-apisports-key": api_key,
-            "Accept": "application/json",
-            "User-Agent": "football-prediction-system/1.0",
-        },
-        method="GET",
-    )
+    """Backward-compatible fixture request function."""
 
     try:
-        with urlopen(
-            request,
-            timeout=timeout,
-        ) as response:
-            raw_data = response.read()
-
-    except Exception as exc:
-        raise RuntimeError(
-            f"API-Football request failed: {exc}"
+        fixture_date = date.fromisoformat(
+            date_text
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid fixture date: {date_text}"
         ) from exc
 
-    try:
-        data = json.loads(
-            raw_data.decode("utf-8")
-        )
-    except (
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-    ) as exc:
-        raise ValueError(
-            "API-Football returned invalid JSON"
-        ) from exc
+    client = APIFootballClient(
+        api_key=_get_api_key(),
+        timeout=timeout,
+    )
 
-    errors = data.get("errors")
-
-    if errors:
-        raise RuntimeError(
-            f"API-Football returned errors: {errors}"
-        )
-
-    response_data = data.get("response")
-
-    if not isinstance(response_data, list):
-        raise ValueError(
-            "API-Football response field "
-            "'response' must be a list"
-        )
-
-    return response_data
+    return client.get_fixtures(
+        fixture_date=fixture_date
+    )
 
 
 def _parse_odds(fixture: dict) -> dict:
-    """
-    API-Football's fixtures endpoint does not reliably provide
-    bookmaker odds.
-
-    The Match model requires odds, so we use conservative
-    placeholder market values when odds are unavailable.
-
-    These values are NOT prediction odds and should not be
-    treated as bookmaker prices.
-    """
+    """Return fallback odds required by the Match model."""
 
     return {
         "home_win": 2.00,
@@ -111,89 +364,11 @@ def _parse_odds(fixture: dict) -> dict:
 
 
 def _convert_fixture(fixture: dict) -> dict:
-    fixture_data = fixture.get("fixture") or {}
-    league_data = fixture.get("league") or {}
-    teams = fixture.get("teams") or {}
+    """Backward-compatible fixture conversion helper."""
 
-    home = teams.get("home") or {}
-    away = teams.get("away") or {}
-
-    fixture_id = fixture_data.get("id")
-
-    kickoff_text = fixture_data.get("date")
-
-    if fixture_id is None:
-        raise ValueError(
-            "API-Football fixture is missing fixture ID"
-        )
-
-    if not kickoff_text:
-        raise ValueError(
-            f"Fixture {fixture_id} is missing kickoff time"
-        )
-
-    if not home.get("name") or not away.get("name"):
-        raise ValueError(
-            f"Fixture {fixture_id} is missing team information"
-        )
-
-    if not league_data.get("name"):
-        raise ValueError(
-            f"Fixture {fixture_id} is missing league information"
-        )
-
-    try:
-        kickoff = datetime.fromisoformat(
-            kickoff_text.replace(
-                "Z",
-                "+00:00",
-            )
-        )
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid kickoff time for fixture "
-            f"{fixture_id}: {kickoff_text}"
-        ) from exc
-
-    kickoff = kickoff.astimezone(
-        KENYA_TIMEZONE
+    return APIFootballClient.convert_fixture(
+        fixture
     )
-
-    status_data = fixture_data.get("status") or {}
-
-    status_short = status_data.get(
-        "short",
-        "",
-    )
-
-    if status_short in {
-        "NS",
-        "TBD",
-        "PST",
-    }:
-        status = "scheduled"
-    elif status_short in {
-        "1H",
-        "HT",
-        "2H",
-        "ET",
-        "BT",
-        "P",
-        "LIVE",
-    }:
-        status = "live"
-    else:
-        status = "finished"
-
-    return {
-        "match_id": str(fixture_id),
-        "home_team": home["name"].strip(),
-        "away_team": away["name"].strip(),
-        "league": league_data["name"].strip(),
-        "kickoff": kickoff,
-        "status": status,
-        "odds": _parse_odds(fixture),
-    }
 
 
 def get_fixtures(
@@ -202,11 +377,8 @@ def get_fixtures(
     timeout: int = 30,
 ) -> list[dict]:
     """
-    Retrieve fixtures from API-Football for today and the
-    following configurable number of days.
-
-    The returned dictionaries are ready to be converted into
-    Match objects.
+    Retrieve fixtures from API-Football for today and
+    the following configurable number of days.
     """
 
     if as_of is None:
@@ -245,20 +417,11 @@ def get_fixtures(
         KENYA_TIMEZONE
     )
 
-    fixtures = []
+    client = APIFootballClient(
+        timeout=timeout
+    )
 
-    for offset in range(days_ahead + 1):
-        target_date = (
-            local_time + timedelta(days=offset)
-        ).date()
-
-        date_text = target_date.isoformat()
-
-        fixtures.extend(
-            _request_fixtures(
-                date_text=date_text,
-                timeout=timeout,
-            )
-        )
-
-    return fixtures
+    return client.get_fixtures_range(
+        start_date=local_time.date(),
+        days_ahead=days_ahead,
+    )
