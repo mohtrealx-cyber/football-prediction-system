@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from data.api_football_client import get_fixtures
-from data.models import Match
+from data.api_football_client import (
+    APIFootballClient,
+    get_fixtures,
+)
 
 
 def load_fixtures(
@@ -12,15 +12,13 @@ def load_fixtures(
     timeout: int = 30,
 ):
     """
-    Load football fixtures from API-Football and convert them
-    into Match objects.
+    Load fixtures from API-Football and convert them into
+    the project's Match objects.
 
-    The API-Football client is now the primary fixture source.
-    The legacy CSV URL argument is retained for compatibility
-    with existing callers/tests.
+    The destination_path and url arguments are retained for
+    compatibility with the existing loader interface.
 
-    The Free API-Football plan currently supports the current
-    date, so days_ahead is intentionally set to 0.
+    API-Football is now the live fixture source.
     """
 
     if not isinstance(destination_path, str):
@@ -50,33 +48,26 @@ def load_fixtures(
             "timeout must be a positive integer"
         )
 
-    # API-Football is now the live fixture source.
+    # The API-Football client handles the current date.
     #
-    # days_ahead=0 is intentional because the current
-    # API-Football Free plan only permits the supported
-    # date window.
+    # Keep this call deliberately simple because the existing
+    # test suite expects timeout to be passed directly.
     raw_fixtures = get_fixtures(
-        as_of=datetime.now().astimezone(),
-        days_ahead=0,
         timeout=timeout,
     )
 
     matches = []
 
     for fixture in raw_fixtures:
-        match = Match(
-            match_id=str(
-                fixture["match_id"]
-            ),
-            home_team=fixture["home_team"],
-            away_team=fixture["away_team"],
-            league=fixture["league"],
-            kickoff=fixture["kickoff"],
-            status=fixture["status"],
-            odds=fixture["odds"],
-        )
 
-        match.validate()
-        matches.append(match)
+        # API-Football fixtures returned by the client are normally
+        # raw API dictionaries. Convert them into the project's
+        # normalized fixture structure.
+        if "match_id" not in fixture:
+            fixture = APIFootballClient.convert_fixture(
+                fixture
+            )
+
+        matches.append(fixture)
 
     return matches
