@@ -3,13 +3,11 @@ from datetime import datetime
 from data.fixture_loader import load_fixtures
 from data.daily_fixtures import get_daily_fixtures
 from data.historical_provider import HistoricalDataProvider
-from pipeline.daily_time_guard import filter_upcoming_fixtures
-from pipeline.daily_real_pipeline import build_daily_real_candidates
+from pipeline.daily_result import build_daily_result
 
 
 FIXTURE_FILE = "fixtures.csv"
 
-# Change these when we connect the historical datasets.
 HISTORICAL_FILES = {
     "Premier League": "data/historical/premier_league.csv",
 }
@@ -28,6 +26,25 @@ def load_historical_data():
         history.extend(provider.get_matches())
 
     return history
+
+
+def print_ticket(ticket):
+    print()
+    print("=" * 70)
+    print(f"TICKET: {ticket.name}")
+    print(f"STAKE: {ticket.stake_percent}%")
+    print(f"COMBINED ODDS: {ticket.combined_odds:.2f}")
+    print(f"AVERAGE CONFIDENCE: {ticket.average_confidence:.2f}%")
+    print("-" * 70)
+
+    for selection in ticket.selections:
+        print(
+            f"- {selection.match}"
+            f" | {selection.market}"
+            f" | odds={selection.odds:.2f}"
+            f" | confidence={selection.confidence:.2f}%"
+            f" | edge={selection.value_edge:.2f}%"
+        )
 
 
 def main():
@@ -66,38 +83,17 @@ def main():
         f"{len(daily_matches)}"
     )
 
-    upcoming_matches = filter_upcoming_fixtures(
-        daily_matches,
-        now,
-    )
-
-    print(
-        f"Upcoming fixtures remaining: "
-        f"{len(upcoming_matches)}"
-    )
-
-    if not upcoming_matches:
-        print("\nNo upcoming fixtures found.")
-        return
-
-    print("\nUpcoming fixtures:")
-
-    for match in upcoming_matches:
-        print(
-            f"- {match.home_team} vs {match.away_team}"
-            f" | {match.league}"
-            f" | {match.kickoff.isoformat()}"
-            f" | odds={match.odds}"
-        )
-
     # ---------------------------------------------------------
     # 4. HISTORICAL DATA
     # ---------------------------------------------------------
-    print("\n[4/5] Loading historical data...")
+    print("\n[2/5] Loading historical data...")
 
     history = load_historical_data()
 
-    print(f"Historical matches loaded: {len(history)}")
+    print(
+        f"Historical matches loaded: "
+        f"{len(history)}"
+    )
 
     if not history:
         print("\nNO BET")
@@ -105,41 +101,68 @@ def main():
         return
 
     # ---------------------------------------------------------
-    # 5. BUILD REAL CANDIDATES
+    # 5. COMPLETE DAILY PIPELINE
     # ---------------------------------------------------------
-    print("\n[5/5] Building real market candidates...")
+    print("\n[3/5] Running complete prediction pipeline...")
 
-    candidates = build_daily_real_candidates(
-        fixtures=upcoming_matches,
+    result = build_daily_result(
+        fixtures=daily_matches,
         history=history,
+        as_of=now,
     )
 
     print(
-        f"Qualified/analysed candidates generated: "
-        f"{len(candidates)}"
+        f"Fixtures received: "
+        f"{result['fixtures_received']}"
     )
 
-    if not candidates:
-        print("\nNO BET")
-        print("Reason: no valid candidates were generated.")
+    print(
+        f"Upcoming fixtures: "
+        f"{result['upcoming_fixtures']}"
+    )
+
+    print(
+        f"Pipeline status: "
+        f"{result['status']}"
+    )
+
+    # ---------------------------------------------------------
+    # NO BET
+    # ---------------------------------------------------------
+    if result["status"] == "NO_BET":
+        print("\n" + "=" * 70)
+        print("NO BET")
+        print("=" * 70)
+        print(
+            "Reason: "
+            "insufficient qualifying selections"
+        )
         return
 
-    print("\nTOP CANDIDATES")
-    print("-" * 70)
+    # ---------------------------------------------------------
+    # READY
+    # ---------------------------------------------------------
+    portfolio = result["portfolio"]
 
-    for candidate in candidates[:20]:
-        print(
-            f"{candidate['home_team']} vs "
-            f"{candidate['away_team']}"
-            f" | {candidate['market']}"
-            f" | odds={candidate['selected_odds']:.2f}"
-            f" | probability="
-            f"{candidate['model_probability']:.3f}"
-            f" | edge="
-            f"{candidate['value_edge']:.2f}%"
-            f" | score="
-            f"{candidate['score']:.2f}"
-        )
+    print("\n[4/5] Portfolio generated.")
+
+    # ---------------------------------------------------------
+    # TICKETS
+    # ---------------------------------------------------------
+    print("\n[5/5] FINAL DAILY TICKETS")
+
+    if not portfolio:
+        print("\nNO BET")
+        print("Reason: portfolio is empty.")
+        return
+
+    for ticket in portfolio:
+        print_ticket(ticket)
+
+    print()
+    print("=" * 70)
+    print("DAILY PIPELINE COMPLETE")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
