@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from data.api_football_client import (
@@ -15,7 +15,7 @@ NAIROBI_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 class APIFixtureProvider:
     """
-    Convert API-Football fixtures into the project's Match model.
+    Convert API-Football fixtures and odds into Match objects.
     """
 
     def __init__(
@@ -26,7 +26,7 @@ class APIFixtureProvider:
 
     def get_matches(
         self,
-        fixture_date=None,
+        fixture_date: date | None = None,
     ) -> list[Match]:
 
         if fixture_date is None:
@@ -40,9 +40,10 @@ class APIFixtureProvider:
             league_id=PREMIER_LEAGUE_ID,
         )
 
-        matches = []
+        matches: list[Match] = []
 
         for fixture in fixtures:
+
             match = self._convert_fixture(
                 fixture
             )
@@ -52,8 +53,8 @@ class APIFixtureProvider:
 
         return matches
 
-    @staticmethod
     def _convert_fixture(
+        self,
         fixture: dict,
     ) -> Match | None:
 
@@ -84,13 +85,9 @@ class APIFixtureProvider:
             .get("name")
         )
 
-        league_name = league.get(
-            "name"
-        )
+        league_name = league.get("name")
 
-        kickoff_text = fixture_data.get(
-            "date"
-        )
+        kickoff_text = fixture_data.get("date")
 
         status_short = (
             fixture_data
@@ -125,17 +122,26 @@ class APIFixtureProvider:
         except ValueError:
             return None
 
-        status = APIFixtureProvider._map_status(
+        status = self._map_status(
             status_short
         )
 
-        # API-Football's fixture endpoint does
-        # not guarantee betting odds.
-        #
-        # We initially create a safe placeholder
-        # only for fixtures that will later receive
-        # actual odds from the odds endpoint.
-        odds = {}
+        # We only want scheduled matches.
+        if status != "scheduled":
+            return None
+
+        odds_response = self.client.get_fixture_odds(
+            int(fixture_id)
+        )
+
+        odds = self._extract_odds(
+            odds_response
+        )
+
+        # A Match without odds cannot enter
+        # the live prediction pipeline.
+        if not odds:
+            return None
 
         return Match(
             match_id=str(fixture_id),
@@ -148,6 +154,157 @@ class APIFixtureProvider:
         )
 
     @staticmethod
+    def _extract_odds(
+        odds_response: list[dict],
+    ) -> dict[str, float]:
+
+        odds: dict[str, float] = {}
+
+        for bookmaker_block in odds_response:
+
+            bookmakers = bookmaker_block.get(
+                "bookmakers",
+                [],
+            )
+
+            if not isinstance(
+                bookmakers,
+                list,
+            ):
+                continue
+
+            for bookmaker in bookmakers:
+
+                bets = bookmaker.get(
+                    "bets",
+                    [],
+                )
+
+                if not isinstance(
+                    bets,
+                    list,
+                ):
+                    continue
+
+                for bet in bets:
+
+                    bet_name = (
+                        str(
+                            bet.get("name", "")
+                        )
+                        .strip()
+                        .lower()
+                    )
+
+                    values = bet.get(
+                        "values",
+                        [],
+                    )
+
+                    if not isinstance(
+                        values,
+                        list,
+                    ):
+                        continue
+
+                    for value in values:
+
+                        if not isinstance(
+                            value,
+                            dict,
+                        ):
+                            continue
+
+                        selection = (
+                            str(
+                                value.get(
+                                    "value",
+                                    "",
+                                )
+                            )
+                            .strip()
+                            .lower()
+                        )
+
+                        odd_text = value.get(
+                            "odd"
+                        )
+
+                        try:
+                            odd = float(
+                                odd_text
+                            )
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            continue
+
+                        if odd <= 1.0:
+                            continue
+
+                        # Match Winner
+                        if (
+                            bet_name
+                            == "match winner"
+                        ):
+                            if selection == "home":
+                                odds.setdefault(
+                                    "home_win",
+                                    odd,
+                                )
+
+                            elif selection == "draw":
+                                odds.setdefault(
+                                    "draw",
+                                    odd,
+                                )
+
+                            elif selection == "away":
+                                odds.setdefault(
+                                    "away_win",
+                                    odd,
+                                )
+
+                        # Over / Under
+                        elif (
+                            "goals over/under"
+                            in bet_name
+                            or "over/under"
+                            in bet_name
+                        ):
+                            if selection == "over 2.5":
+                                odds.setdefault(
+                                    "over_2_5",
+                                    odd,
+                                )
+
+                            elif selection == "under 2.5":
+                                odds.setdefault(
+                                    "under_2_5",
+                                    odd,
+                                )
+
+                        # Both Teams To Score
+                        elif (
+                            bet_name
+                            == "both teams score"
+                        ):
+                            if selection == "yes":
+                                odds.setdefault(
+                                    "btts_yes",
+                                    odd,
+                                )
+
+                            elif selection == "no":
+                                odds.setdefault(
+                                    "btts_no",
+                                    odd,
+                                )
+
+        return odds
+
+    @staticmethod
     def _map_status(
         status: str | None,
     ) -> str:
@@ -156,7 +313,6 @@ class APIFixtureProvider:
             "NS",
             "TBD",
             "PST",
-            "CANC",
         }:
             return "scheduled"
 
