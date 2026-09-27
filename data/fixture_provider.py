@@ -10,34 +10,19 @@ class FixtureDataProvider:
 
     SOURCE_TIMEZONE = ZoneInfo("Europe/London")
 
+    REQUIRED_COLUMNS = {
+        "Date",
+        "Time",
+        "Home",
+        "Away",
+        "Div",
+    }
+
     def __init__(self, csv_path: str):
         if not isinstance(csv_path, str) or not csv_path.strip():
             raise ValueError("csv_path must be a non-empty string")
 
         self.csv_path = csv_path
-
-    @staticmethod
-    def _clean_row(row: dict) -> dict:
-        """
-        Normalize CSV headers and values.
-
-        Football-Data files can contain a UTF-8 BOM or
-        whitespace around column names.
-        """
-        cleaned = {}
-
-        for key, value in row.items():
-            if key is None:
-                continue
-
-            clean_key = key.strip().lstrip("\ufeff")
-
-            if isinstance(value, str):
-                cleaned[clean_key] = value.strip()
-            else:
-                cleaned[clean_key] = value
-
-        return cleaned
 
     def get_matches(self) -> list[Match]:
         matches = []
@@ -52,43 +37,44 @@ class FixtureDataProvider:
 
             if reader.fieldnames is None:
                 raise ValueError(
-                    "Fixture CSV does not contain a header row"
+                    "Fixture CSV has no header row"
                 )
 
-            fieldnames = [
-                field.strip().lstrip("\ufeff")
-                for field in reader.fieldnames
-                if field is not None
-            ]
-
-            required_fields = {
-                "Date",
-                "Time",
-                "Home",
-                "Away",
-                "Div",
+            columns = {
+                column.strip()
+                for column in reader.fieldnames
+                if column is not None
             }
 
-            missing_fields = required_fields - set(fieldnames)
+            missing_columns = sorted(
+                self.REQUIRED_COLUMNS - columns
+            )
 
-            if missing_fields:
+            if missing_columns:
                 raise ValueError(
                     "Fixture CSV is missing required columns: "
-                    f"{sorted(missing_fields)}. "
-                    f"Available columns: {fieldnames}"
+                    f"{missing_columns}. "
+                    f"Available columns: {sorted(columns)}"
                 )
 
-            for row_number, raw_row in enumerate(
-                reader,
-                start=2,
-            ):
-                row = self._clean_row(raw_row)
+            for row_number, row in enumerate(reader, start=2):
+                date_text = (row.get("Date") or "").strip()
+                time_text = (row.get("Time") or "").strip()
+                home_team = (row.get("Home") or "").strip()
+                away_team = (row.get("Away") or "").strip()
+                league = (row.get("Div") or "").strip()
 
-                date_text = row.get("Date", "")
-                time_text = row.get("Time", "")
-                home_team = row.get("Home", "")
-                away_team = row.get("Away", "")
-                league = row.get("Div", "")
+                # Ignore completely blank rows.
+                if not any(
+                    (
+                        date_text,
+                        time_text,
+                        home_team,
+                        away_team,
+                        league,
+                    )
+                ):
+                    continue
 
                 if not date_text:
                     raise ValueError(
@@ -181,12 +167,18 @@ class FixtureDataProvider:
         for market, column in mappings.items():
             value = row.get(column, "")
 
-            if value is None or not str(value).strip():
+            if value is None:
+                continue
+
+            value = value.strip()
+
+            if not value:
                 continue
 
             try:
                 odds[market] = float(value)
-            except (ValueError, TypeError) as exc:
+
+            except ValueError as exc:
                 raise ValueError(
                     f"Invalid odds value for {column}: {value}"
                 ) from exc
