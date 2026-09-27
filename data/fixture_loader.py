@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from data.api_football_client import get_fixtures
 from data.models import Match
+
+
+KENYA_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 
 def load_fixtures(
@@ -44,18 +50,54 @@ def load_fixtures(
     matches = []
 
     for fixture in raw_fixtures:
+        fixture_data = fixture.get("fixture") or {}
+        teams = fixture.get("teams") or {}
+        league = fixture.get("league") or {}
+        status_data = fixture_data.get("status") or {}
+
+        fixture_id = fixture_data.get("id")
+        kickoff_text = fixture_data.get("date")
+
+        home = teams.get("home") or {}
+        away = teams.get("away") or {}
+
+        league_name = league.get("name")
+        home_name = home.get("name")
+        away_name = away.get("name")
+        status_short = status_data.get("short", "")
+
+        if fixture_id is None:
+            raise ValueError(
+                "API-Football fixture is missing fixture ID"
+            )
+
+        if not kickoff_text:
+            raise ValueError(
+                f"Fixture {fixture_id} is missing kickoff time"
+            )
+
+        if not home_name or not away_name:
+            raise ValueError(
+                f"Fixture {fixture_id} is missing team information"
+            )
+
+        if not league_name:
+            raise ValueError(
+                f"Fixture {fixture_id} is missing league information"
+            )
+
+        kickoff = _parse_kickoff(
+            kickoff_text
+        )
+
         match = Match(
-            match_id=str(
-                fixture["fixture"]["id"]
-            ),
-            home_team=fixture["teams"]["home"]["name"],
-            away_team=fixture["teams"]["away"]["name"],
-            league=fixture["league"]["name"],
-            kickoff=_parse_kickoff(
-                fixture["fixture"]["date"]
-            ),
+            match_id=str(fixture_id),
+            home_team=home_name.strip(),
+            away_team=away_name.strip(),
+            league=league_name.strip(),
+            kickoff=kickoff,
             status=_convert_status(
-                fixture["fixture"]["status"]["short"]
+                status_short
             ),
             odds={
                 "home_win": 2.00,
@@ -71,20 +113,39 @@ def load_fixtures(
     return matches
 
 
-def _parse_kickoff(value: str):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+def _parse_kickoff(
+    value: str,
+) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            "kickoff must be a non-empty string"
+        )
 
-    kickoff = datetime.fromisoformat(
-        value.replace("Z", "+00:00")
-    )
+    try:
+        kickoff = datetime.fromisoformat(
+            value.replace(
+                "Z",
+                "+00:00",
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid kickoff datetime: {value}"
+        ) from exc
+
+    if kickoff.tzinfo is None:
+        raise ValueError(
+            "API-Football kickoff must be timezone-aware"
+        )
 
     return kickoff.astimezone(
-        ZoneInfo("Africa/Nairobi")
+        KENYA_TIMEZONE
     )
 
 
-def _convert_status(status: str) -> str:
+def _convert_status(
+    status: str,
+) -> str:
     if status in {
         "NS",
         "TBD",
