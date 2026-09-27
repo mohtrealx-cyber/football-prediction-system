@@ -11,7 +11,6 @@ BASE_URL = "https://v3.football.api-sports.io"
 
 DEFAULT_TIMEOUT = 30
 
-# Premier League
 PREMIER_LEAGUE_ID = 39
 
 
@@ -20,7 +19,7 @@ class APIFootballError(RuntimeError):
 
 
 class APIFootballClient:
-    """Small API-Football client used by the football prediction system."""
+    """Client for API-Football."""
 
     def __init__(
         self,
@@ -52,8 +51,6 @@ class APIFootballClient:
         endpoint: str,
         params: dict | None = None,
     ) -> dict:
-        """Perform one authenticated GET request."""
-
         if not endpoint.startswith("/"):
             endpoint = f"/{endpoint}"
 
@@ -67,9 +64,7 @@ class APIFootballClient:
             }
 
             if clean_params:
-                url = (
-                    f"{url}?{urlencode(clean_params)}"
-                )
+                url = f"{url}?{urlencode(clean_params)}"
 
         request = Request(
             url,
@@ -113,16 +108,16 @@ class APIFootballClient:
                 "API-Football returned invalid JSON"
             ) from exc
 
+        if not isinstance(payload, dict):
+            raise APIFootballError(
+                "API-Football response is not a JSON object"
+            )
+
         errors = payload.get("errors")
 
         if errors:
             raise APIFootballError(
                 f"API-Football returned errors: {errors}"
-            )
-
-        if not isinstance(payload, dict):
-            raise APIFootballError(
-                "API-Football response is not a JSON object"
             )
 
         return payload
@@ -133,11 +128,6 @@ class APIFootballClient:
         league_id: int = PREMIER_LEAGUE_ID,
         season: int | None = None,
     ) -> list[dict]:
-        """
-        Get fixtures for one league on one calendar date.
-
-        API-Football seasons are represented by their starting year.
-        """
 
         if not isinstance(fixture_date, date):
             raise TypeError(
@@ -175,7 +165,6 @@ class APIFootballClient:
         self,
         fixture_id: int,
     ) -> list[dict]:
-        """Get pre-match odds for one fixture."""
 
         if not isinstance(fixture_id, int):
             raise TypeError(
@@ -197,18 +186,3 @@ class APIFootballClient:
             )
 
         return response
-
-    def get_today_fixtures(
-        self,
-        fixture_date: date | None = None,
-        league_id: int = PREMIER_LEAGUE_ID,
-    ) -> list[dict]:
-        """Convenience method for today's fixtures."""
-
-        if fixture_date is None:
-            fixture_date = date.today()
-
-        return self.get_fixtures(
-            fixture_date=fixture_date,
-            league_id=league_id,
-        )
