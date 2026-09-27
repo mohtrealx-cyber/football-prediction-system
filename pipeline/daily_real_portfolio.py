@@ -28,8 +28,16 @@ def build_daily_real_portfolio(
         history,
     )
 
+    # Only qualified candidates are eligible
+    # for portfolio construction.
+    qualified_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.get("qualified") is True
+    ]
+
     portfolio = build_market_portfolio(
-        candidates,
+        qualified_candidates,
     )
 
     # An empty portfolio is an intentional no-bet state.
