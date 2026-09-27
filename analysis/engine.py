@@ -31,17 +31,6 @@ def analyze_selection(
     odds: float,
     minimum_edge: float = 5.0,
 ) -> SelectionAnalysis:
-    """
-    Combine model probability with bookmaker odds.
-
-    minimum_edge is measured in percentage points.
-
-    Example:
-    model probability = 0.60
-    odds = 2.00
-    market probability = 50%
-    value edge = 10%
-    """
 
     if not market.strip():
         raise ValueError("market cannot be empty")
