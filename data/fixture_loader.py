@@ -4,7 +4,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from data.api_football_client import (
-    APIFootballError,
     APIFootballClient,
     get_fixtures,
 )
@@ -17,9 +16,6 @@ KENYA_TIMEZONE = ZoneInfo("Africa/Nairobi")
 def _convert_fixture_to_match(fixture: dict) -> Match:
     """
     Convert a project-format fixture dictionary into a Match object.
-
-    The API client is responsible for converting the raw API-Football
-    response into the project fixture structure.
     """
 
     if not isinstance(fixture, dict):
@@ -89,17 +85,11 @@ def load_fixtures(
     timeout: int = 30,
 ):
     """
-    Load current football fixtures from API-Football.
+    Load football fixtures from API-Football.
 
-    The destination_path and url arguments are retained for backward
-    compatibility with the older Football-Data CSV loader interface.
-
-    Fixtures are returned as Match objects.
+    Returns a list of Match objects.
     """
 
-    # ---------------------------------------------------------
-    # Validate destination path
-    # ---------------------------------------------------------
     if not isinstance(destination_path, str):
         raise TypeError(
             "destination_path must be a string"
@@ -110,9 +100,6 @@ def load_fixtures(
             "destination_path must be a non-empty string"
         )
 
-    # ---------------------------------------------------------
-    # Validate timeout
-    # ---------------------------------------------------------
     if (
         not isinstance(timeout, int)
         or isinstance(timeout, bool)
@@ -123,12 +110,16 @@ def load_fixtures(
         )
 
     # ---------------------------------------------------------
-    # API-Football is now the fixture source.
-    #
-    # Important:
-    # The tests expect the compatibility get_fixtures()
-    # function to receive timeout directly.
+    # API-Football
     # ---------------------------------------------------------
+    #
+    # The compatibility get_fixtures() function handles the
+    # API request and returns converted fixture dictionaries.
+    #
+    # We intentionally do not pass as_of/days_ahead here because
+    # the existing tests expect timeout to be passed directly.
+    # ---------------------------------------------------------
+
     raw_fixtures = get_fixtures(
         timeout=timeout,
     )
@@ -142,12 +133,6 @@ def load_fixtures(
 
     for fixture in raw_fixtures:
 
-        # -----------------------------------------------------
-        # Some API-Football implementations may already return
-        # project-format dictionaries.
-        #
-        # If so, use them directly.
-        # -----------------------------------------------------
         if isinstance(fixture, Match):
             matches.append(fixture)
             continue
@@ -157,9 +142,6 @@ def load_fixtures(
                 "Fixture source returned an invalid fixture"
             )
 
-        # -----------------------------------------------------
-        # Detect whether this is already converted data.
-        # -----------------------------------------------------
         project_fields = {
             "match_id",
             "home_team",
@@ -170,19 +152,18 @@ def load_fixtures(
             "odds",
         }
 
-        if project_fields.issubset(fixture.keys()):
+        # Already converted by API client.
+        if project_fields.issubset(
+            fixture.keys()
+        ):
             converted = fixture
 
         else:
-            # -------------------------------------------------
-            # Raw API-Football response.
-            #
-            # Use APIFootballClient.convert_fixture() so that
-            # the raw API structure becomes the structure
-            # expected by the Match model.
-            # -------------------------------------------------
-            converted = APIFootballClient.convert_fixture(
-                fixture
+            # Raw API-Football fixture.
+            converted = (
+                APIFootballClient.convert_fixture(
+                    fixture
+                )
             )
 
         matches.append(
