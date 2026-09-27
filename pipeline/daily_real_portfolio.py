@@ -28,12 +28,14 @@ def build_daily_real_portfolio(
         history,
     )
 
-    # Only qualified candidates are eligible
-    # for portfolio construction.
+    # Only filter dictionary candidates by their qualification
+    # flag. Preserve other candidate values so downstream
+    # validation continues to handle invalid portfolio input.
     qualified_candidates = [
         candidate
         for candidate in candidates
-        if candidate.get("qualified") is True
+        if not isinstance(candidate, dict)
+        or candidate.get("qualified") is True
     ]
 
     portfolio = build_market_portfolio(
