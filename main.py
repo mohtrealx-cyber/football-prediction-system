@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from data.fixture_loader import load_fixtures
 from data.daily_fixtures import get_daily_fixtures
@@ -13,85 +14,193 @@ FIXTURE_FILE = "fixtures.csv"
 # HISTORICAL DATA SOURCES
 # ============================================================
 #
-# Add historical CSV files here as they become available.
-#
 # The system is NOT limited to the Premier League.
-# Each competition gets its own dataset and league label.
 #
-# IMPORTANT:
-# Do not add a file here until that file actually exists.
+# Supported competitions include:
+#   - Premier League
+#   - Bundesliga
+#   - La Liga
+#   - Serie A
+#   - Ligue 1
+#   - Eredivisie
+#   - Primeira Liga
+#   - UEFA Champions League
+#   - UEFA Europa League
+#   - UEFA Conference League
 #
-HISTORICAL_FILES = {
-    "Premier League": "data/historical/premier_league.csv",
+# A competition is loaded only when its CSV file exists.
+# This prevents the system from crashing while datasets are
+# being added one at a time.
+#
+# All CSV files should use the same structure:
+#
+# Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR
+#
+# Optional odds columns supported by HistoricalDataProvider:
+# B365H,B365D,B365A
+#
+# ============================================================
 
-    # Add these one at a time when their CSV files are ready:
-    #
-    # "Bundesliga": "data/historical/bundesliga.csv",
-    # "La Liga": "data/historical/la_liga.csv",
-    # "Serie A": "data/historical/serie_a.csv",
-    # "Ligue 1": "data/historical/ligue_1.csv",
-    # "Eredivisie": "data/historical/eredivisie.csv",
-    # "Primeira Liga": "data/historical/primeira_liga.csv",
-    #
-    # UEFA competitions:
-    #
-    # "UEFA Champions League":
-    #     "data/historical/champions_league.csv",
-    #
-    # "UEFA Europa League":
-    #     "data/historical/europa_league.csv",
-    #
-    # "UEFA Conference League":
-    #     "data/historical/conference_league.csv",
+HISTORICAL_FILES = {
+    # --------------------------------------------------------
+    # ENGLAND
+    # --------------------------------------------------------
+    "Premier League": (
+        "data/historical/premier_league.csv"
+    ),
+
+    # --------------------------------------------------------
+    # GERMANY
+    # --------------------------------------------------------
+    "Bundesliga": (
+        "data/historical/bundesliga.csv"
+    ),
+
+    # --------------------------------------------------------
+    # SPAIN
+    # --------------------------------------------------------
+    "La Liga": (
+        "data/historical/la_liga.csv"
+    ),
+
+    # --------------------------------------------------------
+    # ITALY
+    # --------------------------------------------------------
+    "Serie A": (
+        "data/historical/serie_a.csv"
+    ),
+
+    # --------------------------------------------------------
+    # FRANCE
+    # --------------------------------------------------------
+    "Ligue 1": (
+        "data/historical/ligue_1.csv"
+    ),
+
+    # --------------------------------------------------------
+    # NETHERLANDS
+    # --------------------------------------------------------
+    "Eredivisie": (
+        "data/historical/eredivisie.csv"
+    ),
+
+    # --------------------------------------------------------
+    # PORTUGAL
+    # --------------------------------------------------------
+    "Primeira Liga": (
+        "data/historical/primeira_liga.csv"
+    ),
+
+    # --------------------------------------------------------
+    # UEFA CHAMPIONS LEAGUE
+    # --------------------------------------------------------
+    "UEFA Champions League": (
+        "data/historical/champions_league.csv"
+    ),
+
+    # --------------------------------------------------------
+    # UEFA EUROPA LEAGUE
+    # --------------------------------------------------------
+    "UEFA Europa League": (
+        "data/historical/europa_league.csv"
+    ),
+
+    # --------------------------------------------------------
+    # UEFA CONFERENCE LEAGUE
+    # --------------------------------------------------------
+    "UEFA Conference League": (
+        "data/historical/conference_league.csv"
+    ),
 }
 
 
 def load_historical_data():
     """
-    Load all configured historical competition data.
+    Load all available historical competition data.
 
-    Every configured CSV is loaded through HistoricalDataProvider.
-    The resulting HistoricalMatch objects are combined into one
-    historical dataset for the prediction pipeline.
+    Every configured CSV that actually exists is loaded through
+    HistoricalDataProvider.
+
+    Missing datasets are skipped instead of causing the entire
+    prediction system to crash.
+
+    Returns:
+        list[HistoricalMatch]: Combined historical dataset.
     """
 
     history = []
 
+    print("\nChecking historical datasets...")
+
     for league, path in HISTORICAL_FILES.items():
+        file_path = Path(path)
+
+        # ----------------------------------------------------
+        # DATASET NOT CREATED YET
+        # ----------------------------------------------------
+        if not file_path.exists():
+            print(
+                f"  SKIPPED: {league} -> {path}"
+                " [file not found]"
+            )
+            continue
+
+        # ----------------------------------------------------
+        # DATASET EXISTS
+        # ----------------------------------------------------
         print(
             f"Loading historical data: "
             f"{league} -> {path}"
         )
 
-        provider = HistoricalDataProvider(
-            csv_path=path,
-            league=league,
-        )
+        try:
+            provider = HistoricalDataProvider(
+                csv_path=path,
+                league=league,
+            )
 
-        matches = provider.get_matches()
+            matches = provider.get_matches()
 
-        print(
-            f"  Loaded {len(matches)} matches"
-        )
+            print(
+                f"  Loaded {len(matches)} matches"
+            )
 
-        history.extend(matches)
+            history.extend(matches)
+
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load historical data for "
+                f"{league}: {exc}"
+            ) from exc
+
+    print(
+        f"\nTotal historical matches loaded: "
+        f"{len(history)}"
+    )
 
     return history
 
 
 def print_ticket(ticket):
+    """
+    Print one generated betting ticket.
+    """
+
     print()
     print("=" * 70)
     print(f"TICKET: {ticket.name}")
     print(f"STAKE: {ticket.stake_percent}%")
+
     print(
         f"COMBINED ODDS: "
         f"{ticket.combined_odds:.2f}"
     )
+
     print(
         f"AVERAGE CONFIDENCE: "
         f"{ticket.average_confidence:.2f}%"
     )
+
     print("-" * 70)
 
     for selection in ticket.selections:
@@ -109,9 +218,10 @@ def main():
     print("FOOTBALL PREDICTION SYSTEM")
     print("=" * 70)
 
-    # ---------------------------------------------------------
+    # ========================================================
     # 1. DOWNLOAD FIXTURES
-    # ---------------------------------------------------------
+    # ========================================================
+
     print(
         "\n[1/5] Downloading latest fixtures..."
     )
@@ -125,9 +235,10 @@ def main():
         f"{len(matches)}"
     )
 
-    # ---------------------------------------------------------
+    # ========================================================
     # 2. CURRENT TIME
-    # ---------------------------------------------------------
+    # ========================================================
+
     now = datetime.now().astimezone()
 
     print(
@@ -135,9 +246,10 @@ def main():
         f"{now.isoformat()}"
     )
 
-    # ---------------------------------------------------------
+    # ========================================================
     # 3. DAILY FIXTURES
-    # ---------------------------------------------------------
+    # ========================================================
+
     daily_matches = get_daily_fixtures(
         matches=matches,
         date=now,
@@ -148,30 +260,29 @@ def main():
         f"{len(daily_matches)}"
     )
 
-    # ---------------------------------------------------------
+    # ========================================================
     # 4. HISTORICAL DATA
-    # ---------------------------------------------------------
+    # ========================================================
+
     print(
         "\n[2/5] Loading historical data..."
     )
 
     history = load_historical_data()
 
-    print(
-        f"\nHistorical matches loaded: "
-        f"{len(history)}"
-    )
-
     if not history:
-        print("\nNO BET")
+        print("\n" + "=" * 70)
+        print("NO BET")
+        print("=" * 70)
         print(
-            "Reason: no historical data available."
+            "Reason: no historical datasets are available."
         )
         return
 
-    # ---------------------------------------------------------
+    # ========================================================
     # 5. COMPLETE DAILY PIPELINE
-    # ---------------------------------------------------------
+    # ========================================================
+
     print(
         "\n[3/5] Running complete prediction pipeline..."
     )
@@ -197,40 +308,49 @@ def main():
         f"{result['status']}"
     )
 
-    # ---------------------------------------------------------
+    # ========================================================
     # NO BET
-    # ---------------------------------------------------------
+    # ========================================================
+
     if result["status"] == "NO_BET":
         print("\n" + "=" * 70)
         print("NO BET")
         print("=" * 70)
+
         print(
             "Reason: "
             "insufficient qualifying selections"
         )
+
         return
 
-    # ---------------------------------------------------------
+    # ========================================================
     # READY
-    # ---------------------------------------------------------
+    # ========================================================
+
     portfolio = result["portfolio"]
 
     print(
         "\n[4/5] Portfolio generated."
     )
 
-    # ---------------------------------------------------------
-    # TICKETS
-    # ---------------------------------------------------------
+    # ========================================================
+    # FINAL TICKETS
+    # ========================================================
+
     print(
         "\n[5/5] FINAL DAILY TICKETS"
     )
 
     if not portfolio:
-        print("\nNO BET")
+        print("\n" + "=" * 70)
+        print("NO BET")
+        print("=" * 70)
+
         print(
             "Reason: portfolio is empty."
         )
+
         return
 
     for ticket in portfolio:
