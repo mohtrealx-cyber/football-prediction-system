@@ -16,6 +16,29 @@ class FixtureDataProvider:
 
         self.csv_path = csv_path
 
+    @staticmethod
+    def _clean_row(row: dict) -> dict:
+        """
+        Normalize CSV headers and values.
+
+        Football-Data files can contain a UTF-8 BOM or
+        whitespace around column names.
+        """
+        cleaned = {}
+
+        for key, value in row.items():
+            if key is None:
+                continue
+
+            clean_key = key.strip().lstrip("\ufeff")
+
+            if isinstance(value, str):
+                cleaned[clean_key] = value.strip()
+            else:
+                cleaned[clean_key] = value
+
+        return cleaned
+
     def get_matches(self) -> list[Match]:
         matches = []
 
@@ -27,12 +50,45 @@ class FixtureDataProvider:
         ) as file:
             reader = csv.DictReader(file)
 
-            for row_number, row in enumerate(reader, start=2):
-                date_text = row.get("Date", "").strip()
-                time_text = row.get("Time", "").strip()
-                home_team = row.get("Home", "").strip()
-                away_team = row.get("Away", "").strip()
-                league = row.get("Div", "").strip()
+            if reader.fieldnames is None:
+                raise ValueError(
+                    "Fixture CSV does not contain a header row"
+                )
+
+            fieldnames = [
+                field.strip().lstrip("\ufeff")
+                for field in reader.fieldnames
+                if field is not None
+            ]
+
+            required_fields = {
+                "Date",
+                "Time",
+                "Home",
+                "Away",
+                "Div",
+            }
+
+            missing_fields = required_fields - set(fieldnames)
+
+            if missing_fields:
+                raise ValueError(
+                    "Fixture CSV is missing required columns: "
+                    f"{sorted(missing_fields)}. "
+                    f"Available columns: {fieldnames}"
+                )
+
+            for row_number, raw_row in enumerate(
+                reader,
+                start=2,
+            ):
+                row = self._clean_row(raw_row)
+
+                date_text = row.get("Date", "")
+                time_text = row.get("Time", "")
+                home_team = row.get("Home", "")
+                away_team = row.get("Away", "")
+                league = row.get("Div", "")
 
                 if not date_text:
                     raise ValueError(
@@ -101,11 +157,10 @@ class FixtureDataProvider:
                     date_format,
                 )
 
-                local_time = parsed.replace(
+                return parsed.replace(
                     tzinfo=cls.SOURCE_TIMEZONE
                 )
 
-                return local_time
             except ValueError:
                 continue
 
@@ -126,17 +181,19 @@ class FixtureDataProvider:
         for market, column in mappings.items():
             value = row.get(column, "")
 
-            if value is None or not value.strip():
+            if value is None or not str(value).strip():
                 continue
 
             try:
                 odds[market] = float(value)
-            except ValueError:
+            except (ValueError, TypeError) as exc:
                 raise ValueError(
                     f"Invalid odds value for {column}: {value}"
-                )
+                ) from exc
 
         if not odds:
-            raise ValueError("No valid odds found for fixture")
+            raise ValueError(
+                "No valid odds found for fixture"
+            )
 
         return odds
