@@ -1,31 +1,64 @@
-from tickets.builder import Selection, TicketBuilder
+from datetime import datetime
+
+from data.fixture_loader import load_fixtures
+from data.daily_fixtures import get_daily_fixtures
+from pipeline.daily_time_guard import filter_upcoming_fixtures
+
+
+FIXTURE_FILE = "fixtures.csv"
+
 
 def main():
-    fake_selections = [
-        Selection("M1", "Arsenal vs Chelsea", "1X", 1.35, 88, 8.2),
-        Selection("M2", "Barcelona vs Valencia", "Barcelona Win", 1.50, 84, 7.1),
-        Selection("M3", "Inter vs Torino", "Inter DNB", 1.40, 82, 5.8),
-        Selection("M4", "Milan vs Lazio", "Over 1.5", 1.30, 78, 6.9),
-        Selection("M5", "Dortmund vs Mainz", "Dortmund Win", 1.60, 74, 9.4),
-        Selection("M6", "PSG vs Lille", "Over 1.5", 1.28, 69, 4.2),
-        Selection("M7", "Porto vs Braga", "1X", 1.37, 65, 7.8),
-        Selection("M8", "Ajax vs Utrecht", "Over 2.5", 1.72, 61, 10.3),
-    ]
+    print("=" * 70)
+    print("FOOTBALL PREDICTION SYSTEM")
+    print("=" * 70)
 
-    builder = TicketBuilder(min_matches=3, max_matches=6)
-    tickets = builder.build(fake_selections)
-    builder.validate_tickets(tickets)
+    print("\nDownloading latest fixtures...")
 
-    for ticket in tickets:
-        print(f"\n{ticket.name} | stake={ticket.stake_percent}%")
-        print(f"combined odds: {ticket.combined_odds}")
-        print(f"average confidence: {ticket.average_confidence}%")
-        for selection in ticket.selections:
-            print(
-                f"  - {selection.match} | {selection.market} | "
-                f"odds {selection.odds} | confidence {selection.confidence}% | "
-                f"value edge {selection.value_edge}%"
-            )
+    matches = load_fixtures(
+        destination_path=FIXTURE_FILE,
+    )
+
+    print(f"Downloaded fixtures: {len(matches)}")
+
+    now = datetime.now().astimezone()
+
+    print(f"\nCurrent time: {now.isoformat()}")
+
+    daily_matches = get_daily_fixtures(
+        matches=matches,
+        date=now,
+    )
+
+    print(
+        f"Fixtures inside Nairobi daily window: "
+        f"{len(daily_matches)}"
+    )
+
+    upcoming_matches = filter_upcoming_fixtures(
+        daily_matches,
+        now,
+    )
+
+    print(
+        f"Upcoming fixtures remaining: "
+        f"{len(upcoming_matches)}"
+    )
+
+    print("\nUpcoming fixtures:")
+
+    if not upcoming_matches:
+        print("No upcoming fixtures found.")
+        return
+
+    for match in upcoming_matches:
+        print(
+            f"- {match.home_team} vs {match.away_team}"
+            f" | {match.league}"
+            f" | {match.kickoff.isoformat()}"
+            f" | odds={match.odds}"
+        )
+
 
 if __name__ == "__main__":
     main()
