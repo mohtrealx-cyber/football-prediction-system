@@ -16,8 +16,8 @@ class TestFootballDataClient(unittest.TestCase):
         )
 
         fake_data = (
-            b"Date,Home,Away\n"
-            b"23/09/2026,Team A,Team B\n"
+            b"Date,Time,Div,Home,Away\n"
+            b"23/09/2026,20:00,E0,Team A,Team B\n"
         )
 
         class FakeResponse:
@@ -42,7 +42,11 @@ class TestFootballDataClient(unittest.TestCase):
             result = download_fixtures(path)
 
         try:
-            self.assertEqual(result, path)
+            self.assertEqual(
+                result,
+                path,
+            )
+
             self.assertTrue(
                 os.path.exists(path)
             )
