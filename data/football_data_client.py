@@ -23,10 +23,18 @@ def download_fixtures(
         )
 
     if not isinstance(url, str) or not url.strip():
-        raise ValueError("url must be a non-empty string")
+        raise ValueError(
+            "url must be a non-empty string"
+        )
 
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-        raise ValueError("timeout must be a positive integer")
+    if (
+        not isinstance(timeout, int)
+        or isinstance(timeout, bool)
+        or timeout <= 0
+    ):
+        raise ValueError(
+            "timeout must be a positive integer"
+        )
 
     request = Request(
         url,
@@ -50,50 +58,22 @@ def download_fixtures(
             "Downloaded fixture file is empty"
         )
 
-    # Decode enough of the response to verify that we actually
-    # received a CSV-like document rather than an HTML/error page.
+    # Make sure the response is at least decodable as text.
+    # We deliberately do NOT validate CSV columns here.
+    #
+    # The downloader's job is to download the resource.
+    # FixtureDataProvider is responsible for validating the
+    # structure required to create Match objects.
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ValueError(
-            "Downloaded fixture file is not valid UTF-8 CSV data"
+            "Downloaded fixture file is not valid UTF-8 text"
         ) from exc
 
     if not text.strip():
         raise ValueError(
-            "Downloaded fixture file contains no CSV data"
-        )
-
-    first_line = text.splitlines()[0].strip()
-
-    if not first_line:
-        raise ValueError(
-            "Downloaded fixture file has an empty header"
-        )
-
-    # Football-Data fixture CSVs must contain these columns.
-    required_columns = {
-        "Date",
-        "Time",
-        "Home",
-        "Away",
-        "Div",
-    }
-
-    header = {
-        column.strip().strip('"')
-        for column in first_line.split(",")
-    }
-
-    missing = sorted(required_columns - header)
-
-    if missing:
-        preview = text[:300].replace("\n", "\\n")
-
-        raise ValueError(
-            "Downloaded fixture data does not contain the expected "
-            f"Football-Data CSV columns. Missing: {missing}. "
-            f"Response preview: {preview}"
+            "Downloaded fixture file contains no data"
         )
 
     with open(destination_path, "wb") as file:
