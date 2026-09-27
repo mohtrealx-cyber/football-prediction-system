@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 
 API_BASE_URL = "https://v3.football.api-sports.io"
+
 KENYA_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 
@@ -55,6 +56,10 @@ class APIFootballClient:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+
+    # ---------------------------------------------------------
+    # LOW LEVEL API REQUEST
+    # ---------------------------------------------------------
 
     def get_fixtures(
         self,
@@ -138,6 +143,111 @@ class APIFootballClient:
 
         return response_data
 
+    # ---------------------------------------------------------
+    # FREE-PLAN DATE HANDLING
+    # ---------------------------------------------------------
+
+    @staticmethod
+    def _extract_free_plan_dates(
+        error_message: str,
+    ) -> tuple[date, date] | None:
+        """
+        Extract the accessible date window from an
+        API-Football Free-plan error.
+
+        Example API message:
+
+        Free plans do not have access to this date,
+        try from 2026-09-26 to 2026-09-28.
+        """
+
+        import re
+
+        if not isinstance(error_message, str):
+            return None
+
+        pattern = (
+            r"try from\s+"
+            r"(\d{4}-\d{2}-\d{2})"
+            r"\s+to\s+"
+            r"(\d{4}-\d{2}-\d{2})"
+        )
+
+        match = re.search(
+            pattern,
+            error_message,
+        )
+
+        if not match:
+            return None
+
+        try:
+            start_date = date.fromisoformat(
+                match.group(1)
+            )
+
+            end_date = date.fromisoformat(
+                match.group(2)
+            )
+
+        except ValueError:
+            return None
+
+        return start_date, end_date
+
+    def _get_fixtures_with_free_plan_fallback(
+        self,
+        fixture_date: date,
+    ) -> list[dict]:
+        """
+        Request fixtures for a date.
+
+        If API-Football rejects the date because of the
+        Free-plan date window, automatically retry using
+        the latest date allowed by the plan.
+        """
+
+        try:
+            return self.get_fixtures(
+                fixture_date=fixture_date
+            )
+
+        except APIFootballError as exc:
+
+            message = str(exc)
+
+            accessible_dates = (
+                self._extract_free_plan_dates(
+                    message
+                )
+            )
+
+            if accessible_dates is None:
+                raise
+
+            start_date, end_date = accessible_dates
+
+            # Prefer the requested date if it is actually
+            # inside the accessible window.
+            if (
+                start_date
+                <= fixture_date
+                <= end_date
+            ):
+                raise
+
+            # If today's date is outside the plan window,
+            # use the latest accessible date.
+            fallback_date = end_date
+
+            return self.get_fixtures(
+                fixture_date=fallback_date
+            )
+
+    # ---------------------------------------------------------
+    # DATE RANGE
+    # ---------------------------------------------------------
+
     def get_fixtures_range(
         self,
         start_date: date,
@@ -162,18 +272,66 @@ class APIFootballClient:
         fixtures = []
 
         for offset in range(days_ahead + 1):
+
             target_date = (
                 start_date
                 + timedelta(days=offset)
             )
 
-            fixtures.extend(
-                self.get_fixtures(
-                    fixture_date=target_date
+            try:
+                daily_fixtures = (
+                    self._get_fixtures_with_free_plan_fallback(
+                        fixture_date=target_date
+                    )
                 )
+
+            except APIFootballError:
+                # Do not silently convert real API errors
+                # into an empty fixture list.
+                raise
+
+            fixtures.extend(
+                daily_fixtures
             )
 
-        return fixtures
+        # Remove duplicate fixtures.
+        #
+        # This is important when several requested dates fall
+        # outside the Free-plan window and therefore resolve
+        # to the same fallback date.
+        unique_fixtures = []
+        seen_ids = set()
+
+        for fixture in fixtures:
+
+            fixture_data = (
+                fixture.get("fixture")
+                if isinstance(fixture, dict)
+                else None
+            )
+
+            fixture_id = (
+                fixture_data.get("id")
+                if isinstance(fixture_data, dict)
+                else None
+            )
+
+            if fixture_id is not None:
+
+                if fixture_id in seen_ids:
+                    continue
+
+                seen_ids.add(fixture_id)
+
+            unique_fixtures.append(
+                fixture
+            )
+
+        return unique_fixtures
+
+    # ---------------------------------------------------------
+    # CONVERSION
+    # ---------------------------------------------------------
 
     @staticmethod
     def convert_fixture(
@@ -184,9 +342,11 @@ class APIFootballClient:
         fixture_data = (
             fixture.get("fixture") or {}
         )
+
         league_data = (
             fixture.get("league") or {}
         )
+
         teams = (
             fixture.get("teams") or {}
         )
@@ -207,7 +367,10 @@ class APIFootballClient:
                 f"Fixture {fixture_id} is missing kickoff time"
             )
 
-        if not home.get("name") or not away.get("name"):
+        if (
+            not home.get("name")
+            or not away.get("name")
+        ):
             raise ValueError(
                 f"Fixture {fixture_id} is missing team information"
             )
@@ -279,6 +442,10 @@ class APIFootballClient:
             },
         }
 
+    # ---------------------------------------------------------
+    # CONVERTED FIXTURES
+    # ---------------------------------------------------------
+
     def get_converted_fixtures(
         self,
         fixture_date: date,
@@ -312,6 +479,10 @@ class APIFootballClient:
         ]
 
 
+# -------------------------------------------------------------
+# BACKWARD-COMPATIBILITY HELPERS
+# -------------------------------------------------------------
+
 def _get_api_key() -> str:
     """Backward-compatible environment API-key helper."""
 
@@ -338,6 +509,7 @@ def _request_fixtures(
         fixture_date = date.fromisoformat(
             date_text
         )
+
     except ValueError as exc:
         raise ValueError(
             f"Invalid fixture date: {date_text}"
@@ -353,7 +525,9 @@ def _request_fixtures(
     )
 
 
-def _parse_odds(fixture: dict) -> dict:
+def _parse_odds(
+    fixture: dict,
+) -> dict:
     """Return fallback odds required by the Match model."""
 
     return {
@@ -363,7 +537,9 @@ def _parse_odds(fixture: dict) -> dict:
     }
 
 
-def _convert_fixture(fixture: dict) -> dict:
+def _convert_fixture(
+    fixture: dict,
+) -> dict:
     """Backward-compatible fixture conversion helper."""
 
     return APIFootballClient.convert_fixture(
@@ -377,8 +553,13 @@ def get_fixtures(
     timeout: int = 30,
 ) -> list[dict]:
     """
-    Retrieve fixtures from API-Football for today and
-    the following configurable number of days.
+    Retrieve fixtures from API-Football.
+
+    The requested date is based on Nairobi time.
+
+    If the Free API plan rejects the requested date,
+    the client automatically uses the latest date
+    allowed by the plan.
     """
 
     if as_of is None:
