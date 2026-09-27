@@ -12,10 +12,12 @@ def download_fixtures(
     url: str = FIXTURES_URL,
     timeout: int = 30,
 ) -> str:
-    """Download the Football-Data fixtures CSV to a local file."""
+    """Download the Football-Data fixtures CSV."""
 
     if not isinstance(destination_path, str):
-        raise TypeError("destination_path must be a string")
+        raise TypeError(
+            "destination_path must be a string"
+        )
 
     if not destination_path.strip():
         raise ValueError(
@@ -46,24 +48,34 @@ def download_fixtures(
                 "(KHTML, like Gecko) "
                 "Chrome/154.0.0.0 Safari/537.36"
             ),
-            "Accept": "text/csv,text/plain,*/*",
+            "Accept": (
+                "text/csv,text/plain,"
+                "application/csv,*/*"
+            ),
         },
     )
 
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen(
+        request,
+        timeout=timeout,
+    ) as response:
+
         data = response.read()
+
+        content_type = (
+            response.headers.get(
+                "Content-Type",
+                "",
+            )
+            if response.headers
+            else ""
+        )
 
     if not data:
         raise ValueError(
             "Downloaded fixture file is empty"
         )
 
-    # Make sure the response is at least decodable as text.
-    # We deliberately do NOT validate CSV columns here.
-    #
-    # The downloader's job is to download the resource.
-    # FixtureDataProvider is responsible for validating the
-    # structure required to create Match objects.
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -76,7 +88,40 @@ def download_fixtures(
             "Downloaded fixture file contains no data"
         )
 
-    with open(destination_path, "wb") as file:
+    # Validate that the response actually looks like CSV.
+    first_line = text.splitlines()[0].strip()
+
+    required_headers = {
+        "Date",
+        "Time",
+        "Home",
+        "Away",
+        "Div",
+    }
+
+    headers = {
+        column.strip()
+        for column in first_line.split(",")
+        if column.strip()
+    }
+
+    missing_headers = sorted(
+        required_headers - headers
+    )
+
+    if missing_headers:
+        raise ValueError(
+            "Downloaded fixture source did not return "
+            "the expected Football-Data CSV. "
+            f"Missing columns: {missing_headers}. "
+            f"Content-Type: {content_type!r}. "
+            f"First line: {first_line[:300]!r}"
+        )
+
+    with open(
+        destination_path,
+        "wb",
+    ) as file:
         file.write(data)
 
     return destination_path
