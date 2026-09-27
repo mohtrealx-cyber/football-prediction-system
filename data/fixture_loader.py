@@ -3,29 +3,28 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from data.api_football_client import get_fixtures
+from data.api_football_client import (
+    APIFootballError,
+    APIFootballClient,
+    get_fixtures,
+)
 from data.models import Match
 
 
 KENYA_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 
-def _convert_fixture_to_match(fixture) -> Match:
+def _convert_fixture_to_match(fixture: dict) -> Match:
     """
-    Convert one API fixture into a Match object.
+    Convert a project-format fixture dictionary into a Match object.
 
-    Supports both:
-    1. Already-normalized fixture dictionaries returned by
-       data.api_football_client.
-    2. Match objects, which are returned by some tests/mocks.
+    The API client is responsible for converting the raw API-Football
+    response into the project fixture structure.
     """
-
-    if isinstance(fixture, Match):
-        return fixture
 
     if not isinstance(fixture, dict):
-        raise TypeError(
-            "API fixture must be a dictionary or Match object"
+        raise ValueError(
+            "API fixture must be a dictionary"
         )
 
     required_fields = {
@@ -58,12 +57,19 @@ def _convert_fixture_to_match(fixture) -> Match:
         )
 
     if kickoff.tzinfo is None or kickoff.utcoffset() is None:
-        kickoff = kickoff.replace(
-            tzinfo=KENYA_TIMEZONE
+        raise ValueError(
+            "API fixture kickoff must be timezone-aware"
         )
-    else:
-        kickoff = kickoff.astimezone(
-            KENYA_TIMEZONE
+
+    kickoff = kickoff.astimezone(
+        KENYA_TIMEZONE
+    )
+
+    odds = fixture["odds"]
+
+    if not isinstance(odds, dict) or not odds:
+        raise ValueError(
+            "API fixture odds must be a non-empty dictionary"
         )
 
     return Match(
@@ -73,47 +79,40 @@ def _convert_fixture_to_match(fixture) -> Match:
         league=str(fixture["league"]).strip(),
         kickoff=kickoff,
         status=str(fixture["status"]),
-        odds=dict(fixture["odds"]),
+        odds=dict(odds),
     )
 
 
 def load_fixtures(
-    destination_path: str | None = None,
-    url: str | None = None,
+    destination_path: str,
+    url: str = None,
     timeout: int = 30,
 ):
     """
-    Load football fixtures from API-Football.
+    Load current football fixtures from API-Football.
 
-    The old implementation downloaded a Football-Data CSV.
-    The system now uses API-Football as the live fixture source.
+    The destination_path and url arguments are retained for backward
+    compatibility with the older Football-Data CSV loader interface.
 
-    destination_path and url are retained for compatibility with
-    older callers/tests. They are not required by the API loader.
+    Fixtures are returned as Match objects.
     """
 
-    if destination_path is not None:
-        if not isinstance(destination_path, str):
-            raise TypeError(
-                "destination_path must be a string"
-            )
+    # ---------------------------------------------------------
+    # Validate destination path
+    # ---------------------------------------------------------
+    if not isinstance(destination_path, str):
+        raise TypeError(
+            "destination_path must be a string"
+        )
 
-        if not destination_path.strip():
-            raise ValueError(
-                "destination_path must be a non-empty string"
-            )
+    if not destination_path.strip():
+        raise ValueError(
+            "destination_path must be a non-empty string"
+        )
 
-    if url is not None:
-        if not isinstance(url, str):
-            raise TypeError(
-                "url must be a string"
-            )
-
-        if not url.strip():
-            raise ValueError(
-                "url must be a non-empty string"
-            )
-
+    # ---------------------------------------------------------
+    # Validate timeout
+    # ---------------------------------------------------------
     if (
         not isinstance(timeout, int)
         or isinstance(timeout, bool)
@@ -123,18 +122,73 @@ def load_fixtures(
             "timeout must be a positive integer"
         )
 
-    # IMPORTANT:
-    # Keep this call simple because the existing test suite expects
-    # get_fixtures(timeout=...) to be called this way.
+    # ---------------------------------------------------------
+    # API-Football is now the fixture source.
+    #
+    # Important:
+    # The tests expect the compatibility get_fixtures()
+    # function to receive timeout directly.
+    # ---------------------------------------------------------
     raw_fixtures = get_fixtures(
         timeout=timeout,
     )
 
+    if not isinstance(raw_fixtures, list):
+        raise ValueError(
+            "Fixture source must return a list"
+        )
+
     matches = []
 
     for fixture in raw_fixtures:
+
+        # -----------------------------------------------------
+        # Some API-Football implementations may already return
+        # project-format dictionaries.
+        #
+        # If so, use them directly.
+        # -----------------------------------------------------
+        if isinstance(fixture, Match):
+            matches.append(fixture)
+            continue
+
+        if not isinstance(fixture, dict):
+            raise ValueError(
+                "Fixture source returned an invalid fixture"
+            )
+
+        # -----------------------------------------------------
+        # Detect whether this is already converted data.
+        # -----------------------------------------------------
+        project_fields = {
+            "match_id",
+            "home_team",
+            "away_team",
+            "league",
+            "kickoff",
+            "status",
+            "odds",
+        }
+
+        if project_fields.issubset(fixture.keys()):
+            converted = fixture
+
+        else:
+            # -------------------------------------------------
+            # Raw API-Football response.
+            #
+            # Use APIFootballClient.convert_fixture() so that
+            # the raw API structure becomes the structure
+            # expected by the Match model.
+            # -------------------------------------------------
+            converted = APIFootballClient.convert_fixture(
+                fixture
+            )
+
         matches.append(
-            _convert_fixture_to_match(fixture)
+            _convert_fixture_to_match(
+                converted
+            )
         )
 
     return matches
