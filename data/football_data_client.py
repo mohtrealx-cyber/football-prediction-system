@@ -59,17 +59,19 @@ def download_fixtures(
         request,
         timeout=timeout,
     ) as response:
-
         data = response.read()
 
-        content_type = (
-            response.headers.get(
+        # Some test doubles do not provide headers.
+        # Only read Content-Type when headers exist.
+        headers = getattr(response, "headers", None)
+
+        if headers is not None:
+            content_type = headers.get(
                 "Content-Type",
                 "",
             )
-            if response.headers
-            else ""
-        )
+        else:
+            content_type = ""
 
     if not data:
         raise ValueError(
@@ -88,7 +90,8 @@ def download_fixtures(
             "Downloaded fixture file contains no data"
         )
 
-    # Validate that the response actually looks like CSV.
+    # Validate that the downloaded resource looks like
+    # the Football-Data fixtures CSV.
     first_line = text.splitlines()[0].strip()
 
     required_headers = {
