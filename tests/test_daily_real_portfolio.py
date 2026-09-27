@@ -361,6 +361,51 @@ class DailyRealPortfolioTests(unittest.TestCase):
             4,
         )
 
+    def test_unqualified_candidates_are_not_passed_to_portfolio_builder(self):
+        fixtures = [self.make_fixture()]
+        history = self.make_history()
+
+        candidates = self.make_candidates()
+
+        # Make one candidate explicitly unqualified.
+        candidates[0]["qualified"] = False
+
+        expected_portfolio = {
+            "ticket_count": 4,
+        }
+
+        with patch(
+            "pipeline.daily_real_portfolio.build_daily_real_candidates",
+            return_value=candidates,
+        ), patch(
+            "pipeline.daily_real_portfolio.build_market_portfolio",
+            return_value=expected_portfolio,
+        ) as portfolio_builder, patch(
+            "pipeline.daily_real_portfolio.validate_daily_portfolio",
+            return_value=True,
+        ):
+
+            build_daily_real_portfolio(
+                fixtures,
+                history,
+            )
+
+        passed_candidates = (
+            portfolio_builder.call_args.args[0]
+        )
+
+        self.assertEqual(
+            len(passed_candidates),
+            len(candidates) - 1,
+        )
+
+        self.assertTrue(
+            all(
+                candidate["qualified"]
+                for candidate in passed_candidates
+            )
+        )
+
     def test_existing_portfolio_builder_interface_remains_available(self):
         candidates = self.make_candidates()
 
