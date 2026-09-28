@@ -10,13 +10,13 @@ class TicketAssemblerTests(TestCase):
         match_id,
         confidence=90.0,
         value_edge=10.0,
-        odds=1.50,
+        selected_odds=1.50,
     ):
         return Selection(
             match_id=match_id,
             match=f"Home {match_id} vs Away {match_id}",
             market="HOME",
-            odds=odds,
+            selected_odds=selected_odds,
             confidence=confidence,
             value_edge=value_edge,
         )
@@ -27,7 +27,7 @@ class TicketAssemblerTests(TestCase):
                 match_id=f"MATCH_{index}",
                 confidence=90.0 - index,
                 value_edge=10.0 - (index * 0.2),
-                odds=1.40 + (index * 0.05),
+                selected_odds=1.40 + (index * 0.05),
             )
             for index in range(count)
         ]
@@ -70,9 +70,9 @@ class TicketAssemblerTests(TestCase):
             stakes,
             [
                 40.0,
+                30.0,
                 20.0,
                 10.0,
-                30.0,
             ],
         )
 
@@ -179,7 +179,7 @@ class TicketAssemblerTests(TestCase):
             match_id=selection.match_id,
             match=selection.match,
             market="",
-            odds=selection.odds,
+            selected_odds=selection.selected_odds,
             confidence=selection.confidence,
             value_edge=selection.value_edge,
         )
