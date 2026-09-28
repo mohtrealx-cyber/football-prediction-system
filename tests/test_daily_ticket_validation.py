@@ -75,10 +75,10 @@ class DailyTicketValidationTests(unittest.TestCase):
         )
 
         expected = {
-            "SAFE": 40.0,
+            "IRONCLAD": 40.0,
             "BALANCED": 30.0,
-            "AGGRESSIVE": 20.0,
-            "VALUE": 10.0,
+            "VOLATILITY": 20.0,
+            "BENCHMARK": 10.0,
         }
 
         actual = {
