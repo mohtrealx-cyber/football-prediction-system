@@ -11,26 +11,26 @@ from tickets.builder import Selection, Ticket
 # ============================================================================
 
 TICKET_SPECS = {
-    "SAFE": {
+    "IRONCLAD": {
         "stake_percent": 40.0,
         "preferred_matches": 3,
         "max_matches": 4,
         "metric": "score",
     },
     "BALANCED": {
-        "stake_percent": 30.0,
+        "stake_percent": 20.0,
         "preferred_matches": 4,
         "max_matches": 5,
         "metric": "score",
     },
-    "AGGRESSIVE": {
-        "stake_percent": 20.0,
+    "VOLATILITY": {
+        "stake_percent": 10.0,
         "preferred_matches": 5,
         "max_matches": 6,
         "metric": "score",
     },
-    "VALUE": {
-        "stake_percent": 10.0,
+    "BENCHMARK": {
+        "stake_percent": 30.0,
         "preferred_matches": 4,
         "max_matches": 5,
         "metric": "value_edge",
@@ -39,10 +39,10 @@ TICKET_SPECS = {
 
 
 TICKET_ORDER = (
-    "SAFE",
+    "IRONCLAD",
     "BALANCED",
-    "AGGRESSIVE",
-    "VALUE",
+    "VOLATILITY",
+    "BENCHMARK",
 )
 
 
@@ -58,7 +58,7 @@ DIVERSITY_PENALTY = 6.0
 # ============================================================================
 # CANDIDATE VALIDATION
 # ============================================================================
-#
+
 # The portfolio engine accepts the core candidate interface:
 #
 #   match_id
@@ -195,7 +195,6 @@ def _resolve_candidate_odds(candidate: dict) -> float:
             "home_win": 1.80,
             "draw": 3.50,
             "away_win": 4.50,
-            ...
         }
 
     3. Explicit selected odds:
@@ -671,10 +670,10 @@ def build_market_portfolio(
 
     Ticket allocation:
 
-        SAFE       40%
-        BALANCED   30%
-        AGGRESSIVE 20%
-        VALUE      10%
+        IRONCLAD   40%
+        BALANCED   20%
+        VOLATILITY 10%
+        BENCHMARK  30%
 
     Rules:
 
@@ -749,9 +748,14 @@ def build_smart_portfolio(
     candidates: List[dict],
 ) -> List[Ticket]:
     """
-    Primary legacy/public portfolio entry point.
+    Primary public portfolio entry point.
 
-    Older tests and portfolio.market_portfolio import this function.
+    Returns the current four-ticket strategy:
+
+        IRONCLAD
+        BALANCED
+        VOLATILITY
+        BENCHMARK
     """
 
     return build_market_portfolio(
