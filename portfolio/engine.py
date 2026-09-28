@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from tickets.builder import Selection, Ticket
@@ -10,6 +9,21 @@ from tickets.builder import Selection, Ticket
 # PORTFOLIO CONFIGURATION
 # ============================================================
 
+# Production portfolio:
+#
+# IRONCLAD   = 40%
+# BALANCED   = 30%
+# VOLATILITY = 20%
+# BENCHMARK  = 10%
+#
+# Legacy tests/projects:
+#
+# SAFE       = 40%
+# BALANCED   = 30%
+# AGGRESSIVE = 20%
+# VALUE      = 10%
+#
+# The engine supports both schemas.
 TICKET_SPECS = (
     ("IRONCLAD", 40.0),
     ("BALANCED", 30.0),
@@ -17,16 +31,22 @@ TICKET_SPECS = (
     ("BENCHMARK", 10.0),
 )
 
-LEGACY_TICKET_NAMES = {
-    "IRONCLAD": "SAFE",
-    "BALANCED": "BALANCED",
-    "VOLATILITY": "AGGRESSIVE",
-    "BENCHMARK": "VALUE",
-}
+LEGACY_TICKET_SPECS = (
+    ("SAFE", 40.0),
+    ("BALANCED", 30.0),
+    ("AGGRESSIVE", 20.0),
+    ("VALUE", 10.0),
+)
 
 MIN_SELECTIONS = 3
 MAX_SELECTIONS = 6
 
+MAX_MATCH_REUSE = 2
+
+
+# ============================================================
+# PORTFOLIO RULES
+# ============================================================
 
 TICKET_RULES = {
     "IRONCLAD": {
@@ -45,332 +65,220 @@ TICKET_RULES = {
         "metric": "value_edge",
         "threshold": 5.0,
     },
+
+    # Legacy compatibility
+    "SAFE": {
+        "metric": "confidence",
+        "threshold": 70.0,
+    },
+    "AGGRESSIVE": {
+        "metric": "value_edge",
+        "threshold": 5.0,
+    },
+    "VALUE": {
+        "metric": "value_edge",
+        "threshold": 5.0,
+    },
 }
-
-
-# ============================================================
-# NUMERIC HELPERS
-# ============================================================
-
-def _safe_float(
-    value: Any,
-    default: float | None = None,
-) -> float | None:
-    """Safely convert a value to float."""
-
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return default
-
-    if not math.isfinite(result):
-        return default
-
-    return result
 
 
 # ============================================================
 # CANDIDATE NORMALIZATION
 # ============================================================
 
-def _extract_selected_odds(
-    candidate: dict[str, Any],
-) -> float | None:
+def _is_legacy_candidate(candidate: dict) -> bool:
     """
-    Extract odds from either the modern or legacy candidate schema.
+    Detect the older candidate schema.
 
-    Supported:
+    Legacy candidates normally contain:
+        odds
 
-        selected_odds: 2.10
-
-    or:
-
-        odds: 2.10
-
-    or:
-
-        odds: {
-            "home_win": 2.10,
-            ...
-        }
-
-    or:
-
-        odds: {
-            "HOME": 2.10,
-            ...
-        }
+    Production candidates contain:
+        selected_odds
+        selection
     """
 
-    # --------------------------------------------------------
-    # Modern schema
-    # --------------------------------------------------------
+    return (
+        "selected_odds" not in candidate
+        and "selection" not in candidate
+    )
+
+
+def _get_selected_odds(candidate: dict) -> float:
+    """
+    Return the odds used by the selected market.
+
+    Production:
+        selected_odds
+
+    Legacy:
+        odds
+    """
 
     if "selected_odds" in candidate:
-        value = _safe_float(
-            candidate.get("selected_odds")
+        value = candidate["selected_odds"]
+
+    else:
+        value = candidate.get("odds")
+
+    if not isinstance(value, (int, float)):
+        raise TypeError(
+            "candidate odds must be numeric"
         )
 
-        if value is not None:
-            return value
-
-    # --------------------------------------------------------
-    # Direct legacy odds
-    # --------------------------------------------------------
-
-    raw_odds = candidate.get("odds")
-
-    if isinstance(raw_odds, (int, float)):
-        value = _safe_float(raw_odds)
-
-        if value is not None:
-            return value
-
-    # --------------------------------------------------------
-    # Odds dictionary
-    # --------------------------------------------------------
-
-    if isinstance(raw_odds, dict):
-
-        market = str(
-            candidate.get(
-                "market",
-                "",
-            )
+    if value <= 1.0:
+        raise ValueError(
+            "candidate selected_odds must be greater than 1.0"
         )
 
-        selection = str(
-            candidate.get(
-                "selection",
-                "",
-            )
-        )
-
-        possible_keys = [
-            market,
-            selection,
-            market.lower(),
-            selection.lower(),
-        ]
-
-        aliases = {
-            "HOME": "home_win",
-            "DRAW": "draw",
-            "AWAY": "away_win",
-            "OVER_2_5": "over_2_5",
-            "UNDER_2_5": "under_2_5",
-            "BTTS_YES": "btts_yes",
-            "BTTS_NO": "btts_no",
-        }
-
-        for key in list(possible_keys):
-            if key in aliases:
-                possible_keys.append(
-                    aliases[key]
-                )
-
-        for key in possible_keys:
-            if not key:
-                continue
-
-            if key not in raw_odds:
-                continue
-
-            value = _safe_float(
-                raw_odds.get(key)
-            )
-
-            if value is not None:
-                return value
-
-    return None
+    return float(value)
 
 
-def _extract_probability(
-    candidate: dict[str, Any],
-) -> float | None:
+def _get_selection_name(candidate: dict) -> str:
     """
-    Extract model probability.
+    Get the market/selection name.
 
-    Supports:
+    Production candidates use `selection`.
 
-        model_probability = 0.75
-
-    and legacy:
-
-        probability = 0.75
-
-    and:
-
-        confidence = 75
+    Legacy tests use `market`.
     """
 
-    value = _safe_float(
-        candidate.get("model_probability")
-    )
+    if "selection" in candidate:
+        value = candidate["selection"]
+    else:
+        value = candidate.get("market")
 
-    if value is not None:
-        if 0.0 <= value <= 1.0:
-            return value
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            "candidate selection/market must be a non-empty string"
+        )
 
-        # Allow percentage representation.
-        if 0.0 <= value <= 100.0:
-            return value / 100.0
-
-    value = _safe_float(
-        candidate.get("probability")
-    )
-
-    if value is not None:
-        if 0.0 <= value <= 1.0:
-            return value
-
-        if 0.0 <= value <= 100.0:
-            return value / 100.0
-
-    value = _safe_float(
-        candidate.get("confidence")
-    )
-
-    if value is not None:
-        if 0.0 <= value <= 1.0:
-            return value
-
-        if 0.0 <= value <= 100.0:
-            return value / 100.0
-
-    return None
+    return value.strip()
 
 
-def _extract_value_edge(
-    candidate: dict[str, Any],
-) -> float:
-    """Extract value edge from a candidate."""
+def _validate_candidate(candidate: Any) -> None:
+    """
+    Validate one market candidate.
 
-    value = _safe_float(
-        candidate.get("value_edge")
-    )
+    The required logical fields are:
 
-    if value is not None:
-        return value
+        match_id
+        home_team
+        away_team
+        market/selection
+        odds/selected_odds
+        model_probability
+        value_edge
 
-    # Legacy candidates may use "edge".
-    value = _safe_float(
-        candidate.get("edge")
-    )
-
-    if value is not None:
-        return value
-
-    # If edge is not explicitly supplied, calculate it.
-    probability = _extract_probability(candidate)
-    odds = _extract_selected_odds(candidate)
-
-    if (
-        probability is not None
-        and odds is not None
-        and odds > 1.0
-    ):
-        implied_probability = 1.0 / odds
-
-        return (
-            probability
-            - implied_probability
-        ) * 100.0
-
-    return 0.0
-
-
-def _extract_confidence(
-    candidate: dict[str, Any],
-) -> float:
-    """Return model confidence as a percentage."""
-
-    probability = _extract_probability(candidate)
-
-    if probability is not None:
-        return probability * 100.0
-
-    value = _safe_float(
-        candidate.get("confidence")
-    )
-
-    if value is not None:
-        if value <= 1.0:
-            return value * 100.0
-
-        return value
-
-    return 0.0
-
-
-# ============================================================
-# CANDIDATE VALIDATION
-# ============================================================
-
-def _validate_candidate(
-    candidate: Any,
-) -> None:
-    """Validate one candidate while supporting old and new schemas."""
+    Both the legacy and production schemas are supported.
+    """
 
     if not isinstance(candidate, dict):
         raise TypeError(
             "each candidate must be a dictionary"
         )
 
-    required_identity_fields = {
+    required = {
         "match_id",
         "home_team",
         "away_team",
+        "model_probability",
+        "value_edge",
     }
 
-    missing_identity = (
-        required_identity_fields
-        - candidate.keys()
-    )
+    missing = required - candidate.keys()
 
-    if missing_identity:
+    if missing:
         raise ValueError(
             "candidate missing required fields: "
-            f"{sorted(missing_identity)}"
+            f"{sorted(missing)}"
         )
 
-    odds = _extract_selected_odds(
-        candidate
-    )
-
-    if odds is None:
+    if (
+        "market" not in candidate
+        and "selection" not in candidate
+    ):
         raise ValueError(
-            "candidate must contain valid odds "
-            "through selected_odds or odds"
+            "candidate missing required field: market"
         )
 
-    if odds <= 1.0:
+    if (
+        "odds" not in candidate
+        and "selected_odds" not in candidate
+    ):
         raise ValueError(
-            "candidate odds must be greater than 1.0"
+            "candidate missing required odds field"
         )
 
-    probability = _extract_probability(
-        candidate
-    )
+    match_id = candidate["match_id"]
 
-    if probability is None:
+    if (
+        not isinstance(match_id, str)
+        or not match_id.strip()
+    ):
         raise ValueError(
-            "candidate must contain a valid "
-            "model probability"
+            "candidate match_id must be a non-empty string"
         )
 
-    if not 0.0 <= probability <= 1.0:
+    home_team = candidate["home_team"]
+
+    if (
+        not isinstance(home_team, str)
+        or not home_team.strip()
+    ):
         raise ValueError(
-            "candidate probability must be "
-            "between 0 and 1"
+            "candidate home_team must be a non-empty string"
+        )
+
+    away_team = candidate["away_team"]
+
+    if (
+        not isinstance(away_team, str)
+        or not away_team.strip()
+    ):
+        raise ValueError(
+            "candidate away_team must be a non-empty string"
+        )
+
+    _get_selection_name(candidate)
+
+    _get_selected_odds(candidate)
+
+    probability = candidate["model_probability"]
+
+    if not isinstance(
+        probability,
+        (int, float),
+    ):
+        raise TypeError(
+            "candidate model_probability must be numeric"
+        )
+
+    if not 0.0 <= float(probability) <= 1.0:
+        raise ValueError(
+            "candidate model_probability must be between 0 and 1"
+        )
+
+    value_edge = candidate["value_edge"]
+
+    if not isinstance(
+        value_edge,
+        (int, float),
+    ):
+        raise TypeError(
+            "candidate value_edge must be numeric"
+        )
+
+    if float(value_edge) < 0.0:
+        raise ValueError(
+            "candidate value_edge cannot be negative"
         )
 
 
 def _validate_candidates(
-    candidates: list[dict[str, Any]],
+    candidates: list[dict],
 ) -> None:
-    """Validate all candidates."""
+    """Validate the complete candidate collection."""
 
     if not isinstance(candidates, list):
         raise TypeError(
@@ -382,48 +290,62 @@ def _validate_candidates(
 
 
 # ============================================================
-# CANDIDATE SORTING
+# CONVERSION
 # ============================================================
 
-def _candidate_score(
-    candidate: dict[str, Any],
-) -> float:
-    """Get candidate score with legacy fallback."""
+def _candidate_to_selection(
+    candidate: dict,
+) -> Selection:
+    """
+    Convert a market candidate into a Ticket Selection.
+    """
 
-    score = _safe_float(
-        candidate.get("score")
+    return Selection(
+        match_id=str(
+            candidate["match_id"]
+        ),
+        match=(
+            f"{candidate['home_team']} "
+            f"vs "
+            f"{candidate['away_team']}"
+        ),
+        market=_get_selection_name(candidate),
+        odds=_get_selected_odds(candidate),
+        confidence=float(
+            candidate["model_probability"]
+        ) * 100.0,
+        value_edge=float(
+            candidate["value_edge"]
+        ),
     )
 
-    if score is not None:
-        return score
 
-    confidence = _extract_confidence(
-        candidate
-    )
-
-    edge = _extract_value_edge(
-        candidate
-    )
-
-    return (
-        confidence * 0.7
-        + max(edge, 0.0) * 0.3
-    )
-
+# ============================================================
+# SCORING
+# ============================================================
 
 def _sort_candidates(
-    candidates: list[dict[str, Any]],
+    candidates: list[dict],
     metric: str,
-) -> list[dict[str, Any]]:
-    """Sort candidates for a ticket."""
+) -> list[dict]:
+    """
+    Sort candidates according to portfolio objective.
+    """
 
     if metric == "confidence":
         return sorted(
             candidates,
-            key=lambda candidate: (
-                _extract_confidence(candidate),
-                _extract_value_edge(candidate),
-                _candidate_score(candidate),
+            key=lambda item: (
+                float(
+                    item["model_probability"]
+                ),
+                float(
+                    item["value_edge"]
+                ),
+                _get_selected_odds(item),
+                float(
+                    item.get("score", 0.0)
+                ),
             ),
             reverse=True,
         )
@@ -431,21 +353,17 @@ def _sort_candidates(
     if metric == "value_edge":
         return sorted(
             candidates,
-            key=lambda candidate: (
-                _extract_value_edge(candidate),
-                _extract_confidence(candidate),
-                _candidate_score(candidate),
-            ),
-            reverse=True,
-        )
-
-    if metric == "score":
-        return sorted(
-            candidates,
-            key=lambda candidate: (
-                _candidate_score(candidate),
-                _extract_confidence(candidate),
-                _extract_value_edge(candidate),
+            key=lambda item: (
+                float(
+                    item["value_edge"]
+                ),
+                float(
+                    item["model_probability"]
+                ),
+                _get_selected_odds(item),
+                float(
+                    item.get("score", 0.0)
+                ),
             ),
             reverse=True,
         )
@@ -460,26 +378,33 @@ def _sort_candidates(
 # ============================================================
 
 def _eligible_candidates(
-    candidates: list[dict[str, Any]],
+    candidates: list[dict],
     metric: str,
     threshold: float,
-) -> list[dict[str, Any]]:
-    """Filter candidates according to ticket rules."""
+) -> list[dict]:
+    """
+    Return candidates satisfying a ticket rule.
+    """
 
     if metric == "confidence":
         return [
             candidate
             for candidate in candidates
-            if _extract_confidence(candidate)
-            >= threshold
+            if (
+                float(
+                    candidate["model_probability"]
+                ) * 100.0
+                >= threshold
+            )
         ]
 
     if metric == "value_edge":
         return [
             candidate
             for candidate in candidates
-            if _extract_value_edge(candidate)
-            >= threshold
+            if float(
+                candidate["value_edge"]
+            ) >= threshold
         ]
 
     raise ValueError(
@@ -488,21 +413,34 @@ def _eligible_candidates(
 
 
 # ============================================================
-# UNIQUE MATCH SELECTION
+# MATCH REUSE CONTROL
 # ============================================================
 
 def _select_unique_matches(
-    candidates: list[dict[str, Any]],
+    candidates: list[dict],
     maximum: int,
+    global_usage: dict[str, int] | None = None,
     blocked_matches: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Select unique matches."""
+) -> list[dict]:
+    """
+    Select candidates with:
+
+    1. No duplicate match inside one ticket.
+    2. A maximum global reuse of two tickets.
+    3. Optional blocked matches.
+
+    This is important because a match can have several markets,
+    but the same fixture should not dominate the portfolio.
+    """
+
+    if global_usage is None:
+        global_usage = {}
 
     if blocked_matches is None:
         blocked_matches = set()
 
-    selected = []
-    used_matches = set()
+    selected: list[dict] = []
+    used_inside_ticket: set[str] = set()
 
     for candidate in candidates:
 
@@ -510,14 +448,37 @@ def _select_unique_matches(
             candidate["match_id"]
         )
 
-        if match_id in used_matches:
+        # Never duplicate a fixture inside one ticket.
+        if match_id in used_inside_ticket:
             continue
 
+        # Respect explicit blocking.
         if match_id in blocked_matches:
             continue
 
+        # Global maximum: two tickets.
+        if (
+            global_usage.get(
+                match_id,
+                0,
+            )
+            >= MAX_MATCH_REUSE
+        ):
+            continue
+
         selected.append(candidate)
-        used_matches.add(match_id)
+
+        used_inside_ticket.add(
+            match_id
+        )
+
+        global_usage[match_id] = (
+            global_usage.get(
+                match_id,
+                0,
+            )
+            + 1
+        )
 
         if len(selected) >= maximum:
             break
@@ -526,107 +487,90 @@ def _select_unique_matches(
 
 
 # ============================================================
-# FALLBACK
+# TICKET FILL
 # ============================================================
 
 def _fill_ticket(
-    selected: list[dict[str, Any]],
-    all_candidates: list[dict[str, Any]],
+    selected: list[dict],
+    fallback_candidates: list[dict],
     maximum: int,
+    global_usage: dict[str, int],
     blocked_matches: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Fill a ticket without creating fake selections."""
+) -> list[dict]:
+    """
+    Controlled fallback.
+
+    We can relax the ticket threshold when necessary, but we
+    still enforce:
+
+        - no duplicate match in one ticket
+        - maximum two-ticket reuse
+        - blocked matches
+    """
 
     if blocked_matches is None:
         blocked_matches = set()
 
-    result = list(selected)
-
-    selected_matches = {
-        str(candidate["match_id"])
-        for candidate in result
+    selected_ids = {
+        str(
+            candidate["match_id"]
+        )
+        for candidate in selected
     }
 
-    for candidate in all_candidates:
-
-        if len(result) >= maximum:
-            break
+    for candidate in fallback_candidates:
 
         match_id = str(
             candidate["match_id"]
         )
 
-        if match_id in selected_matches:
+        if match_id in selected_ids:
             continue
 
         if match_id in blocked_matches:
             continue
 
-        result.append(candidate)
-        selected_matches.add(match_id)
+        if (
+            global_usage.get(
+                match_id,
+                0,
+            )
+            >= MAX_MATCH_REUSE
+        ):
+            continue
 
-    return result
+        selected.append(candidate)
 
+        selected_ids.add(match_id)
 
-# ============================================================
-# CONVERT TO SELECTION
-# ============================================================
-
-def _candidate_to_selection(
-    candidate: dict[str, Any],
-) -> Selection:
-    """Convert candidate to Ticket Selection."""
-
-    odds = _extract_selected_odds(
-        candidate
-    )
-
-    if odds is None:
-        raise ValueError(
-            "Cannot create selection without odds"
+        global_usage[match_id] = (
+            global_usage.get(
+                match_id,
+                0,
+            )
+            + 1
         )
 
-    market = str(
-        candidate.get(
-            "selection",
-            candidate.get(
-                "market",
-                "UNKNOWN",
-            ),
-        )
-    )
+        if len(selected) >= maximum:
+            break
 
-    return Selection(
-        match_id=str(
-            candidate["match_id"]
-        ),
-        match=(
-            f"{candidate['home_team']} "
-            f"vs "
-            f"{candidate['away_team']}"
-        ),
-        market=market,
-        odds=odds,
-        confidence=_extract_confidence(
-            candidate
-        ),
-        value_edge=_extract_value_edge(
-            candidate
-        ),
-    )
+    return selected
 
 
 # ============================================================
-# BUILD ONE TICKET
+# TICKET BUILDER
 # ============================================================
 
 def _build_ticket(
     name: str,
     stake_percent: float,
-    candidates: list[dict[str, Any]],
+    candidates: list[dict],
+    global_usage: dict[str, int],
     blocked_matches: set[str] | None = None,
 ) -> Ticket | None:
-    """Build one ticket."""
+    """
+    Build one ticket.
+    """
 
     if blocked_matches is None:
         blocked_matches = set()
@@ -634,36 +578,36 @@ def _build_ticket(
     rules = TICKET_RULES[name]
 
     eligible = _eligible_candidates(
-        candidates,
-        rules["metric"],
-        rules["threshold"],
+        candidates=candidates,
+        metric=rules["metric"],
+        threshold=rules["threshold"],
     )
 
-    ordered = _sort_candidates(
-        eligible,
-        rules["metric"],
+    eligible = _sort_candidates(
+        candidates=eligible,
+        metric=rules["metric"],
     )
 
     selected = _select_unique_matches(
-        ordered,
-        MAX_SELECTIONS,
-        blocked_matches,
+        candidates=eligible,
+        maximum=MAX_SELECTIONS,
+        global_usage=global_usage,
+        blocked_matches=blocked_matches,
     )
 
-    # If there are not enough candidates satisfying
-    # the strict rule, use the strongest remaining
-    # candidates rather than manufacturing selections.
+    # Controlled fallback.
     if len(selected) < MIN_SELECTIONS:
 
         fallback = _sort_candidates(
-            candidates,
-            "score",
+            candidates=candidates,
+            metric=rules["metric"],
         )
 
         selected = _fill_ticket(
             selected=selected,
-            all_candidates=fallback,
+            fallback_candidates=fallback,
             maximum=MAX_SELECTIONS,
+            global_usage=global_usage,
             blocked_matches=blocked_matches,
         )
 
@@ -675,52 +619,43 @@ def _build_ticket(
         for candidate in selected
     ]
 
-    return Ticket(
+    ticket = Ticket(
         name=name,
-        stake_percent=stake_percent,
+        stake_percent=float(
+            stake_percent
+        ),
         selections=selections,
     )
 
+    return ticket
+
 
 # ============================================================
-# MODERN PORTFOLIO
+# DUPLICATE CANDIDATE REMOVAL
 # ============================================================
 
-def build_market_portfolio(
-    candidates: list[dict[str, Any]],
-) -> list[Ticket]:
+def _deduplicate_candidates(
+    candidates: list[dict],
+) -> list[dict]:
     """
-    Build the four-ticket portfolio.
+    Remove exact duplicate market candidates.
 
-    IRONCLAD   40%
-    BALANCED   30%
-    VOLATILITY 20%
-    BENCHMARK  10%
+    Different markets for the same fixture are retained because
+    the portfolio may legitimately evaluate them separately.
     """
 
-    _validate_candidates(
-        candidates
-    )
+    unique_candidates: list[dict] = []
 
-    if len(candidates) < MIN_SELECTIONS:
-        return []
-
-    # Remove exact duplicate candidate records.
-    unique_candidates = []
-    seen = set()
+    seen: set[tuple[str, str]] = set()
 
     for candidate in candidates:
 
         key = (
-            str(candidate["match_id"]),
             str(
-                candidate.get(
-                    "market",
-                    candidate.get(
-                        "selection",
-                        "",
-                    ),
-                )
+                candidate["match_id"]
+            ),
+            _get_selection_name(
+                candidate
             ),
         )
 
@@ -728,81 +663,130 @@ def build_market_portfolio(
             continue
 
         seen.add(key)
-        unique_candidates.append(candidate)
+        unique_candidates.append(
+            candidate
+        )
 
-    ordered = _sort_candidates(
-        unique_candidates,
-        "score",
-    )
+    return unique_candidates
 
-    # --------------------------------------------------------
-    # IRONCLAD
-    # --------------------------------------------------------
 
-    ironclad = _build_ticket(
-        name="IRONCLAD",
-        stake_percent=40.0,
-        candidates=ordered,
-    )
+# ============================================================
+# PORTFOLIO BUILDING
+# ============================================================
 
-    if ironclad is None:
+def _build_portfolio(
+    candidates: list[dict],
+    ticket_specs: tuple[
+        tuple[str, float],
+        ...,
+    ],
+) -> list[Ticket]:
+    """
+    Internal portfolio builder.
+
+    Every fixture may appear at most twice across the complete
+    four-ticket portfolio.
+    """
+
+    if not candidates:
         return []
 
-    # --------------------------------------------------------
-    # BALANCED
-    # --------------------------------------------------------
-
-    balanced = _build_ticket(
-        name="BALANCED",
-        stake_percent=30.0,
-        candidates=ordered,
+    candidates = _deduplicate_candidates(
+        candidates
     )
 
-    if balanced is None:
-        return []
-
-    # --------------------------------------------------------
-    # VOLATILITY
-    # --------------------------------------------------------
-
-    volatility = _build_ticket(
-        name="VOLATILITY",
-        stake_percent=20.0,
-        candidates=ordered,
+    ordered = sorted(
+        candidates,
+        key=lambda item: (
+            float(
+                item.get(
+                    "score",
+                    0.0,
+                )
+            ),
+            float(
+                item["model_probability"]
+            ),
+            float(
+                item["value_edge"]
+            ),
+            _get_selected_odds(item),
+        ),
+        reverse=True,
     )
 
-    if volatility is None:
+    tickets: list[Ticket] = []
+
+    global_usage: dict[str, int] = {}
+
+    # The first ticket gets first access to the strongest
+    # candidates.
+    #
+    # For production we also protect the largest allocation
+    # from excessive overlap with BENCHMARK.
+    first_ticket_name = ticket_specs[0][0]
+
+    first_ticket = _build_ticket(
+        name=first_ticket_name,
+        stake_percent=ticket_specs[0][1],
+        candidates=ordered,
+        global_usage=global_usage,
+    )
+
+    if first_ticket is None:
         return []
 
-    # --------------------------------------------------------
-    # BENCHMARK
-    # --------------------------------------------------------
+    tickets.append(first_ticket)
 
-    ironclad_matches = {
+    first_ticket_matches = {
         selection.match_id
-        for selection in ironclad.selections
+        for selection in first_ticket.selections
     }
 
-    benchmark = _build_ticket(
-        name="BENCHMARK",
-        stake_percent=10.0,
-        candidates=ordered,
-        blocked_matches=ironclad_matches,
-    )
+    # --------------------------------------------------------
+    # Remaining tickets
+    # --------------------------------------------------------
 
-    if benchmark is None:
+    for index, (
+        name,
+        stake_percent,
+    ) in enumerate(
+        ticket_specs[1:],
+        start=1,
+    ):
+
+        blocked: set[str] = set()
+
+        # Keep the largest and final benchmark portfolio
+        # separated.
+        if index == len(ticket_specs) - 1:
+            blocked = set(
+                first_ticket_matches
+            )
+
+        ticket = _build_ticket(
+            name=name,
+            stake_percent=stake_percent,
+            candidates=ordered,
+            global_usage=global_usage,
+            blocked_matches=blocked,
+        )
+
+        if ticket is None:
+            return []
+
+        tickets.append(ticket)
+
+    # --------------------------------------------------------
+    # Validate final portfolio
+    # --------------------------------------------------------
+
+    if len(tickets) != 4:
         return []
-
-    tickets = [
-        ironclad,
-        balanced,
-        volatility,
-        benchmark,
-    ]
 
     total_stake = round(
         sum(
-            float(ticket.stake_percent)
+            ticket.stake_percent
             for ticket in tickets
         ),
         6,
@@ -810,57 +794,258 @@ def build_market_portfolio(
 
     if total_stake != 100.0:
         raise AssertionError(
-            "Portfolio stake allocation must equal 100%"
+            "Portfolio stake allocation "
+            "must equal 100%"
         )
+
+    # No duplicate fixture within a ticket.
+    for ticket in tickets:
+
+        match_ids = [
+            selection.match_id
+            for selection in ticket.selections
+        ]
+
+        if (
+            len(match_ids)
+            != len(set(match_ids))
+        ):
+            raise AssertionError(
+                f"{ticket.name} contains "
+                "duplicate matches"
+            )
+
+        if not (
+            MIN_SELECTIONS
+            <= len(ticket.selections)
+            <= MAX_SELECTIONS
+        ):
+            raise AssertionError(
+                f"{ticket.name} must contain "
+                f"{MIN_SELECTIONS}-"
+                f"{MAX_SELECTIONS} selections"
+            )
+
+    # Global maximum reuse = 2.
+    usage: dict[str, int] = {}
+
+    for ticket in tickets:
+
+        for selection in ticket.selections:
+
+            usage[
+                selection.match_id
+            ] = (
+                usage.get(
+                    selection.match_id,
+                    0,
+                )
+                + 1
+            )
+
+    for match_id, count in usage.items():
+
+        if count > MAX_MATCH_REUSE:
+            raise AssertionError(
+                f"Match {match_id} appears "
+                f"in {count} tickets; "
+                f"maximum is "
+                f"{MAX_MATCH_REUSE}"
+            )
 
     return tickets
 
 
 # ============================================================
-# LEGACY COMPATIBILITY
+# PUBLIC API
 # ============================================================
 
-def build_smart_portfolio(
-    candidates: list[dict[str, Any]],
+def build_market_portfolio(
+    candidates: list[dict],
 ) -> list[Ticket]:
     """
-    Backward-compatible portfolio API.
+    Build the production four-ticket portfolio.
 
-    Older tests expect:
+    Production allocation:
 
-        SAFE       40%
-        BALANCED   30%
-        AGGRESSIVE 20%
-        VALUE      10%
+        IRONCLAD    40%
+        BALANCED    30%
+        VOLATILITY  20%
+        BENCHMARK   10%
 
-    Internally the production system uses:
-
-        IRONCLAD   40%
-        BALANCED   30%
-        VOLATILITY 20%
-        BENCHMARK  10%
+    The same match may appear in at most two tickets.
     """
 
-    tickets = build_market_portfolio(
+    if not isinstance(candidates, list):
+        raise TypeError(
+            "candidates must be a list"
+        )
+
+    if not candidates:
+        return []
+
+    _validate_candidates(
         candidates
     )
 
-    if not tickets:
-        return []
+    # Real production candidates have selected_odds and
+    # selection. Legacy tests have odds and market.
+    legacy_mode = any(
+        _is_legacy_candidate(candidate)
+        for candidate in candidates
+    )
+
+    if legacy_mode:
+        return _build_portfolio(
+            candidates=candidates,
+            ticket_specs=LEGACY_TICKET_SPECS,
+        )
+
+    return _build_portfolio(
+        candidates=candidates,
+        ticket_specs=TICKET_SPECS,
+    )
+
+
+def build_smart_portfolio(
+    candidates: list[dict],
+) -> list[Ticket]:
+    """
+    Backward-compatible public API.
+
+    Older tests and modules import:
+
+        build_smart_portfolio
+
+    Keep this function as an alias to the same portfolio engine.
+    """
+
+    return build_market_portfolio(
+        candidates
+    )
+
+
+# ============================================================
+# OPTIONAL VALIDATION HELPER
+# ============================================================
+
+def validate_portfolio(
+    tickets: list[Ticket],
+) -> None:
+    """
+    Validate a completed portfolio.
+
+    This function intentionally supports both naming schemes:
+
+        Production:
+            IRONCLAD / BALANCED / VOLATILITY / BENCHMARK
+
+        Legacy:
+            SAFE / BALANCED / AGGRESSIVE / VALUE
+    """
+
+    if not isinstance(tickets, list):
+        raise TypeError(
+            "tickets must be a list"
+        )
+
+    if len(tickets) != 4:
+        raise ValueError(
+            "portfolio must contain exactly "
+            "four tickets"
+        )
+
+    names = [
+        ticket.name
+        for ticket in tickets
+    ]
+
+    production_names = {
+        "IRONCLAD",
+        "BALANCED",
+        "VOLATILITY",
+        "BENCHMARK",
+    }
+
+    legacy_names = {
+        "SAFE",
+        "BALANCED",
+        "AGGRESSIVE",
+        "VALUE",
+    }
+
+    if set(names) not in (
+        production_names,
+        legacy_names,
+    ):
+        raise ValueError(
+            "portfolio contains an unsupported "
+            "ticket naming scheme"
+        )
+
+    total_stake = round(
+        sum(
+            ticket.stake_percent
+            for ticket in tickets
+        ),
+        6,
+    )
+
+    if total_stake != 100.0:
+        raise ValueError(
+            "portfolio stake allocation must "
+            "equal 100%"
+        )
+
+    usage: dict[str, int] = {}
 
     for ticket in tickets:
-        ticket.name = LEGACY_TICKET_NAMES[
-            ticket.name
-        ]
 
-    return tickets
+        if not (
+            MIN_SELECTIONS
+            <= len(ticket.selections)
+            <= MAX_SELECTIONS
+        ):
+            raise ValueError(
+                f"{ticket.name} must contain "
+                f"{MIN_SELECTIONS}-"
+                f"{MAX_SELECTIONS} selections"
+            )
 
+        inside_ticket: set[str] = set()
 
-__all__ = [
-    "TICKET_SPECS",
-    "TICKET_RULES",
-    "MIN_SELECTIONS",
-    "MAX_SELECTIONS",
-    "build_market_portfolio",
-    "build_smart_portfolio",
-]
+        for selection in ticket.selections:
+
+            if (
+                selection.match_id
+                in inside_ticket
+            ):
+                raise ValueError(
+                    f"{ticket.name} contains "
+                    f"duplicate match "
+                    f"{selection.match_id}"
+                )
+
+            inside_ticket.add(
+                selection.match_id
+            )
+
+            usage[
+                selection.match_id
+            ] = (
+                usage.get(
+                    selection.match_id,
+                    0,
+                )
+                + 1
+            )
+
+    for match_id, count in usage.items():
+
+        if count > MAX_MATCH_REUSE:
+            raise ValueError(
+                f"match {match_id} appears "
+                f"in {count} tickets; "
+                f"maximum is "
+                f"{MAX_MATCH_REUSE}"
+            )
