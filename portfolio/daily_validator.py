@@ -5,17 +5,17 @@ from typing import Any
 
 
 EXPECTED_TICKETS = (
-    "SAFE",
+    "IRONCLAD",
     "BALANCED",
-    "AGGRESSIVE",
-    "VALUE",
+    "VOLATILITY",
+    "BENCHMARK",
 )
 
 EXPECTED_STAKES = {
-    "SAFE": 40.0,
+    "IRONCLAD": 40.0,
     "BALANCED": 30.0,
-    "AGGRESSIVE": 20.0,
-    "VALUE": 10.0,
+    "VOLATILITY": 20.0,
+    "BENCHMARK": 10.0,
 }
 
 MIN_SELECTIONS = 3
@@ -24,14 +24,22 @@ MAX_MATCH_REUSE = 2
 
 
 def _validate_ticket(ticket: Any) -> None:
+    """Validate one portfolio ticket."""
+
     if not hasattr(ticket, "name"):
-        raise TypeError("each portfolio item must be a Ticket")
+        raise TypeError(
+            "each portfolio item must be a Ticket"
+        )
 
     if not hasattr(ticket, "stake_percent"):
-        raise TypeError("ticket must have stake_percent")
+        raise TypeError(
+            "ticket must have stake_percent"
+        )
 
     if not hasattr(ticket, "selections"):
-        raise TypeError("ticket must have selections")
+        raise TypeError(
+            "ticket must have selections"
+        )
 
     if ticket.name not in EXPECTED_TICKETS:
         raise ValueError(
@@ -40,7 +48,7 @@ def _validate_ticket(ticket: Any) -> None:
 
     expected_stake = EXPECTED_STAKES[ticket.name]
 
-    if ticket.stake_percent != expected_stake:
+    if float(ticket.stake_percent) != expected_stake:
         raise ValueError(
             f"{ticket.name} has invalid stake allocation"
         )
@@ -52,6 +60,8 @@ def _validate_ticket(ticket: Any) -> None:
 
     selection_count = len(ticket.selections)
 
+    # Empty tickets are allowed for validator-level tests.
+    # The portfolio engine itself never returns empty tickets.
     if selection_count == 0:
         return
 
@@ -92,6 +102,8 @@ def _validate_ticket(ticket: Any) -> None:
 def validate_daily_portfolio(
     portfolio: list[Any],
 ) -> bool:
+    """Validate the complete four-ticket portfolio."""
+
     if not isinstance(portfolio, list):
         raise TypeError(
             "portfolio must be a list"
@@ -105,17 +117,33 @@ def validate_daily_portfolio(
     for ticket in portfolio:
         _validate_ticket(ticket)
 
-    ticket_names = [ticket.name for ticket in portfolio]
+    ticket_names = [
+        ticket.name
+        for ticket in portfolio
+    ]
 
     if set(ticket_names) != set(EXPECTED_TICKETS):
         raise ValueError(
-            "portfolio must contain SAFE, BALANCED, "
-            "AGGRESSIVE and VALUE exactly once"
+            "portfolio must contain IRONCLAD, BALANCED, "
+            "VOLATILITY and BENCHMARK exactly once"
         )
 
     if len(ticket_names) != len(set(ticket_names)):
         raise ValueError(
             "duplicate ticket name found"
+        )
+
+    total_stake = round(
+        sum(
+            float(ticket.stake_percent)
+            for ticket in portfolio
+        ),
+        6,
+    )
+
+    if total_stake != 100.0:
+        raise ValueError(
+            "portfolio stake allocation must equal 100%"
         )
 
     match_usage = Counter()
@@ -133,3 +161,13 @@ def validate_daily_portfolio(
             )
 
     return True
+
+
+__all__ = [
+    "EXPECTED_TICKETS",
+    "EXPECTED_STAKES",
+    "MIN_SELECTIONS",
+    "MAX_SELECTIONS",
+    "MAX_MATCH_REUSE",
+    "validate_daily_portfolio",
+]
