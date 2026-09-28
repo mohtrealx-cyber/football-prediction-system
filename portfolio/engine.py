@@ -11,7 +11,7 @@ from tickets.builder import Selection, Ticket
 # ============================================================================
 
 TICKET_SPECS = {
-    "SAFE": {
+    "IRONCLAD": {
         "stake_percent": 40.0,
         "preferred_matches": 3,
         "max_matches": 4,
@@ -23,13 +23,13 @@ TICKET_SPECS = {
         "max_matches": 5,
         "metric": "score",
     },
-    "AGGRESSIVE": {
+    "VOLATILITY": {
         "stake_percent": 20.0,
         "preferred_matches": 5,
         "max_matches": 6,
         "metric": "score",
     },
-    "VALUE": {
+    "BENCHMARK": {
         "stake_percent": 10.0,
         "preferred_matches": 4,
         "max_matches": 5,
@@ -39,17 +39,20 @@ TICKET_SPECS = {
 
 
 TICKET_ORDER = (
-    "SAFE",
+    "IRONCLAD",
     "BALANCED",
-    "AGGRESSIVE",
-    "VALUE",
+    "VOLATILITY",
+    "BENCHMARK",
 )
 
 
+# Minimum number of selections required for a ticket to be created.
 MIN_SELECTIONS = 3
+
 
 # A match may appear in at most two different tickets.
 MAX_MATCH_USAGE = 2
+
 
 # Penalize matches that have already appeared in another ticket.
 DIVERSITY_PENALTY = 6.0
@@ -57,29 +60,6 @@ DIVERSITY_PENALTY = 6.0
 
 # ============================================================================
 # CANDIDATE VALIDATION
-# ============================================================================
-#
-# The portfolio engine accepts the core candidate interface:
-#
-#   match_id
-#   market
-#   odds
-#   score
-#   value_edge
-#
-# Additional fields such as:
-#
-#   home_team
-#   away_team
-#   selection
-#   selected_odds
-#   model_probability
-#   confidence
-#
-# are supported when available.
-#
-# This preserves compatibility with both the older portfolio tests and the
-# newer daily-real candidate pipeline.
 # ============================================================================
 
 REQUIRED_CANDIDATE_FIELDS = (
@@ -195,7 +175,6 @@ def _resolve_candidate_odds(candidate: dict) -> float:
             "home_win": 1.80,
             "draw": 3.50,
             "away_win": 4.50,
-            ...
         }
 
     3. Explicit selected odds:
@@ -432,15 +411,6 @@ def _candidate_to_selection(candidate: dict) -> Selection:
     """
     Convert one candidate into the exact Selection structure supported by
     tickets/builder.py.
-
-    Selection accepts:
-
-        match_id
-        match
-        market
-        odds
-        confidence
-        value_edge
     """
 
     _validate_candidate(candidate)
@@ -505,7 +475,6 @@ def _legacy_selection_key(candidate: dict) -> str:
         candidate.get("market", "")
     ).strip().upper()
 
-    # Legacy market compatibility.
     legacy_mapping = {
         "1": "HOME",
         "X": "DRAW",
@@ -671,10 +640,10 @@ def build_market_portfolio(
 
     Ticket allocation:
 
-        SAFE       40%
-        BALANCED   30%
-        AGGRESSIVE 20%
-        VALUE      10%
+        IRONCLAD    40%
+        BALANCED    30%
+        VOLATILITY  20%
+        BENCHMARK   10%
 
     Rules:
 
@@ -749,7 +718,7 @@ def build_smart_portfolio(
     candidates: List[dict],
 ) -> List[Ticket]:
     """
-    Primary legacy/public portfolio entry point.
+    Primary public portfolio entry point.
 
     Older tests and portfolio.market_portfolio import this function.
     """
