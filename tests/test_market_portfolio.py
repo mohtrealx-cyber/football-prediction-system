@@ -17,7 +17,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Arsenal",
                 "away_team": "Chelsea",
                 "market": "1X",
-                "odds": 1.35,
+                "selected_odds": 1.35,
                 "model_probability": 0.88,
                 "value_edge": 8.2,
                 "score": 88.0,
@@ -27,7 +27,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Barcelona",
                 "away_team": "Valencia",
                 "market": "Home Win",
-                "odds": 1.50,
+                "selected_odds": 1.50,
                 "model_probability": 0.84,
                 "value_edge": 7.1,
                 "score": 84.0,
@@ -37,7 +37,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Inter",
                 "away_team": "Torino",
                 "market": "DNB",
-                "odds": 1.40,
+                "selected_odds": 1.40,
                 "model_probability": 0.82,
                 "value_edge": 5.8,
                 "score": 82.0,
@@ -47,7 +47,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Milan",
                 "away_team": "Lazio",
                 "market": "Over 1.5",
-                "odds": 1.30,
+                "selected_odds": 1.30,
                 "model_probability": 0.78,
                 "value_edge": 6.9,
                 "score": 78.0,
@@ -57,7 +57,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Dortmund",
                 "away_team": "Mainz",
                 "market": "Home Win",
-                "odds": 1.60,
+                "selected_odds": 1.60,
                 "model_probability": 0.74,
                 "value_edge": 9.4,
                 "score": 74.0,
@@ -67,7 +67,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "PSG",
                 "away_team": "Lille",
                 "market": "Over 1.5",
-                "odds": 1.28,
+                "selected_odds": 1.28,
                 "model_probability": 0.69,
                 "value_edge": 4.2,
                 "score": 69.0,
@@ -77,7 +77,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Porto",
                 "away_team": "Braga",
                 "market": "1X",
-                "odds": 1.37,
+                "selected_odds": 1.37,
                 "model_probability": 0.65,
                 "value_edge": 7.8,
                 "score": 65.0,
@@ -87,7 +87,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Ajax",
                 "away_team": "Utrecht",
                 "market": "Over 2.5",
-                "odds": 1.72,
+                "selected_odds": 1.72,
                 "model_probability": 0.61,
                 "value_edge": 10.3,
                 "score": 61.0,
@@ -97,7 +97,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Benfica",
                 "away_team": "Braga",
                 "market": "1X",
-                "odds": 1.32,
+                "selected_odds": 1.32,
                 "model_probability": 0.72,
                 "value_edge": 6.5,
                 "score": 72.0,
@@ -107,7 +107,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Napoli",
                 "away_team": "Roma",
                 "market": "Over 1.5",
-                "odds": 1.42,
+                "selected_odds": 1.42,
                 "model_probability": 0.71,
                 "value_edge": 7.0,
                 "score": 71.0,
@@ -394,7 +394,7 @@ class TestMarketPortfolio(unittest.TestCase):
             {
                 **self.candidates[0],
                 "market": "Over 1.5",
-                "odds": 1.40,
+                "selected_odds": 1.40,
                 "value_edge": 6.0,
                 "score": 70.0,
             },
@@ -449,7 +449,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Arsenal",
                 "away_team": "Chelsea",
                 "market": "1X",
-                "odds": 1.35,
+                "selected_odds": 1.35,
                 "model_probability": 0.88,
                 "score": 88.0,
             }
@@ -466,7 +466,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "home_team": "Arsenal",
                 "away_team": "Chelsea",
                 "market": "1X",
-                "odds": 1.35,
+                "selected_odds": 1.35,
                 "model_probability": 0.88,
                 "value_edge": 8.2,
                 "score": 88.0,
@@ -484,7 +484,7 @@ class TestMarketPortfolio(unittest.TestCase):
                 "match_id": "M1",
                 "home_team": "Arsenal",
                 "away_team": "Chelsea",
-                "odds": 1.35,
+                "selected_odds": 1.35,
                 "model_probability": 0.88,
                 "value_edge": 8.2,
                 "score": 88.0,
@@ -534,7 +534,7 @@ class TestMarketPortfolio(unittest.TestCase):
         bad_candidates = [
             {
                 **self.candidates[0],
-                "odds": 1.0,
+                "selected_odds": 1.0,
             },
             *self.candidates[1:],
         ]
@@ -548,7 +548,7 @@ class TestMarketPortfolio(unittest.TestCase):
         bad_candidates = [
             {
                 **self.candidates[0],
-                "odds": 0,
+                "selected_odds": 0,
             },
             *self.candidates[1:],
         ]
@@ -629,7 +629,7 @@ class TestMarketPortfolio(unittest.TestCase):
         for ticket in tickets:
             for selection in ticket.selections:
                 self.assertGreater(
-                    selection.odds,
+                    selection.selected_odds,
                     1.0,
                 )
 
