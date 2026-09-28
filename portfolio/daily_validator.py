@@ -85,6 +85,11 @@ def _validate_ticket(ticket: Any) -> None:
                 "each selection must have match_id"
             )
 
+        if not hasattr(selection, "selected_odds"):
+            raise ValueError(
+                "selection is missing selected_odds"
+            )
+
         if hasattr(selection, "qualified"):
             if selection.qualified is not True:
                 raise ValueError(
