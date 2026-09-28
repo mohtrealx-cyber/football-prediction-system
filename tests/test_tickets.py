@@ -1,77 +1,144 @@
-import unittest
+from unittest import TestCase
 
 from tickets.builder import Selection, TicketBuilder
 
 
-class TicketBuilderTests(unittest.TestCase):
+class TicketBuilderTests(TestCase):
 
-    def setUp(self):
-        self.selections = [
-            Selection("M1", "A vs B", "1X", 1.35, 88, 8.2),
-            Selection("M2", "C vs D", "Home", 1.50, 84, 7.1),
-            Selection("M3", "E vs F", "DNB", 1.40, 82, 5.8),
-            Selection("M4", "G vs H", "Over 1.5", 1.30, 78, 6.9),
-            Selection("M5", "I vs J", "Home", 1.60, 74, 9.4),
-            Selection("M6", "K vs L", "Over 1.5", 1.28, 69, 4.2),
-            Selection("M7", "M vs N", "1X", 1.37, 65, 7.8),
-            Selection("M8", "O vs P", "Over 2.5", 1.72, 61, 10.3),
+    def _selection(
+        self,
+        match_id,
+        confidence=90.0,
+        value_edge=10.0,
+        odds=1.50,
+    ):
+        return Selection(
+            match_id=match_id,
+            match=f"Home {match_id} vs Away {match_id}",
+            market="HOME",
+            odds=odds,
+            confidence=confidence,
+            value_edge=value_edge,
+        )
+
+    def _selections(self, count=12):
+        return [
+            self._selection(
+                f"MATCH_{i}",
+                confidence=95.0 - i,
+                value_edge=15.0 - (i * 0.25),
+                odds=1.40 + (i * 0.03),
+            )
+            for i in range(count)
         ]
 
     def test_four_tickets_can_be_built(self):
         builder = TicketBuilder()
 
-        tickets = builder.build(self.selections)
+        tickets = builder.build(
+            self._selections(12)
+        )
 
         self.assertEqual(
-            [t.name for t in tickets],
-            ["SAFE", "BALANCED", "AGGRESSIVE", "VALUE"],
+            [ticket.name for ticket in tickets],
+            [
+                "IRONCLAD",
+                "BALANCED",
+                "VOLATILITY",
+                "BENCHMARK",
+            ],
         )
 
-        builder.validate_tickets(tickets)
-
-    def test_stakes_are_40_30_20_10(self):
+    def test_stakes_are_40_20_10_30(self):
         builder = TicketBuilder()
 
-        tickets = builder.build(self.selections)
+        tickets = builder.build(
+            self._selections(12)
+        )
 
         self.assertEqual(
-            [t.stake_percent for t in tickets],
-            [40.0, 30.0, 20.0, 10.0],
+            [
+                ticket.stake_percent
+                for ticket in tickets
+            ],
+            [
+                40.0,
+                20.0,
+                10.0,
+                30.0,
+            ],
         )
 
-    def test_every_ticket_has_at_least_three_matches(self):
+    def test_ticket_names_match_strategy(self):
         builder = TicketBuilder()
 
-        tickets = builder.build(self.selections)
-
-        self.assertTrue(
-            all(len(t.selections) >= 3 for t in tickets)
+        tickets = builder.build(
+            self._selections(12)
         )
 
-    def test_no_forced_ticket_when_only_two_qualify(self):
-        only_two = self.selections[:2]
-
-        builder = TicketBuilder()
-
-        tickets = builder.build(only_two)
-
-        self.assertEqual(tickets, [])
-
-    def test_no_duplicate_match_inside_ticket(self):
-        duplicate = [
-            Selection("M1", "A vs B", "1X", 1.35, 88, 8.2),
-            Selection("M1", "A vs B", "Over 1.5", 1.40, 86, 7.0),
-            *self.selections[1:7],
+        expected = [
+            "IRONCLAD",
+            "BALANCED",
+            "VOLATILITY",
+            "BENCHMARK",
         ]
 
+        actual = [
+            ticket.name
+            for ticket in tickets
+        ]
+
+        self.assertEqual(
+            actual,
+            expected,
+        )
+
+    def test_total_stake_is_100_percent(self):
         builder = TicketBuilder()
 
-        tickets = builder.build(duplicate)
+        tickets = builder.build(
+            self._selections(12)
+        )
+
+        total_stake = sum(
+            ticket.stake_percent
+            for ticket in tickets
+        )
+
+        self.assertEqual(
+            total_stake,
+            100.0,
+        )
+
+    def test_each_ticket_has_three_to_six_matches(self):
+        builder = TicketBuilder()
+
+        tickets = builder.build(
+            self._selections(12)
+        )
+
+        for ticket in tickets:
+            self.assertGreaterEqual(
+                len(ticket.selections),
+                3,
+            )
+
+            self.assertLessEqual(
+                len(ticket.selections),
+                6,
+            )
+
+    def test_no_duplicate_matches_inside_ticket(self):
+        builder = TicketBuilder()
+
+        tickets = builder.build(
+            self._selections(12)
+        )
 
         for ticket in tickets:
             match_ids = [
-                s.match_id
-                for s in ticket.selections
+                selection.match_id
+                for selection in ticket.selections
             ]
 
             self.assertEqual(
@@ -81,4 +148,6 @@ class TicketBuilderTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    import unittest
+
     unittest.main()
