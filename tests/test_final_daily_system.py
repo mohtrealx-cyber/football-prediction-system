@@ -1,4 +1,3 @@
-```python
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -124,14 +123,17 @@ class FinalDailySystemTests(unittest.TestCase):
                     home_team=home_team,
                     away_team=away_team,
                     league="TEST_LEAGUE",
-                    kickoff=datetime(
-                        2026,
-                        9,
-                        25,
-                        12,
-                        0,
-                        tzinfo=timezone.utc,
-                    ) + timedelta(hours=index),
+                    kickoff=(
+                        datetime(
+                            2026,
+                            9,
+                            25,
+                            12,
+                            0,
+                            tzinfo=timezone.utc,
+                        )
+                        + timedelta(hours=index)
+                    ),
                     status="scheduled",
                     odds=odds,
                 )
@@ -140,16 +142,16 @@ class FinalDailySystemTests(unittest.TestCase):
         return fixtures
 
     def test_complete_daily_system_returns_report(self):
+        fixtures = self._fixtures()
+        history = self._history()
+
         result = build_daily_report_output(
-            self._fixtures(),
-            self._history(),
+            fixtures,
+            history,
             self.as_of,
         )
 
-        self.assertIsInstance(
-            result,
-            dict,
-        )
+        self.assertIsInstance(result, dict)
 
         self.assertEqual(
             result["report_type"],
@@ -171,9 +173,7 @@ class FinalDailySystemTests(unittest.TestCase):
             self.as_of,
         )
 
-        serialized = json.dumps(
-            result
-        )
+        serialized = json.dumps(result)
 
         self.assertIsInstance(
             serialized,
@@ -181,8 +181,10 @@ class FinalDailySystemTests(unittest.TestCase):
         )
 
     def test_daily_metadata_is_correct(self):
+        fixtures = self._fixtures()
+
         result = build_daily_report_output(
-            self._fixtures(),
+            fixtures,
             self._history(),
             self.as_of,
         )
@@ -257,18 +259,67 @@ class FinalDailySystemTests(unittest.TestCase):
             "BENCHMARK": 10.0,
         }
 
+        actual_stakes = {
+            ticket["name"]: ticket["stake_percent"]
+            for ticket in portfolio
+        }
+
+        self.assertEqual(
+            actual_stakes,
+            expected_stakes,
+        )
+
+    def test_ready_portfolio_contains_valid_ticket_structure(self):
+        result = build_daily_report_output(
+            self._fixtures(),
+            self._history(),
+            self.as_of,
+        )
+
+        if result["status"] == "NO_BET":
+            self.skipTest(
+                "No qualifying portfolio was produced."
+            )
+
+        portfolio = result["portfolio"]
+
         for ticket in portfolio:
             self.assertIn(
+                "name",
+                ticket,
+            )
+
+            self.assertIn(
+                "stake_percent",
+                ticket,
+            )
+
+            self.assertIn(
+                "selections",
+                ticket,
+            )
+
+            self.assertIn(
                 ticket["name"],
-                expected_stakes,
+                {
+                    "IRONCLAD",
+                    "BALANCED",
+                    "VOLATILITY",
+                    "BENCHMARK",
+                },
             )
 
-            self.assertEqual(
+            self.assertIsInstance(
                 ticket["stake_percent"],
-                expected_stakes[ticket["name"]],
+                (int, float),
             )
 
-    def test_ticket_stakes_sum_to_one_hundred(self):
+            self.assertIsInstance(
+                ticket["selections"],
+                list,
+            )
+
+    def test_ready_portfolio_stakes_total_100_percent(self):
         result = build_daily_report_output(
             self._fixtures(),
             self._history(),
@@ -290,35 +341,6 @@ class FinalDailySystemTests(unittest.TestCase):
         self.assertEqual(
             total_stake,
             100.0,
-        )
-
-    def test_expected_ticket_order(self):
-        result = build_daily_report_output(
-            self._fixtures(),
-            self._history(),
-            self.as_of,
-        )
-
-        if result["status"] == "NO_BET":
-            self.skipTest(
-                "No qualifying portfolio was produced."
-            )
-
-        portfolio = result["portfolio"]
-
-        ticket_names = [
-            ticket["name"]
-            for ticket in portfolio
-        ]
-
-        self.assertEqual(
-            ticket_names,
-            [
-                "IRONCLAD",
-                "BALANCED",
-                "VOLATILITY",
-                "BENCHMARK",
-            ],
         )
 
     def test_empty_inputs_produce_no_bet(self):
@@ -419,4 +441,3 @@ class FinalDailySystemTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-```
