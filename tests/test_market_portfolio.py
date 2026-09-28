@@ -510,6 +510,29 @@ class TestMarketPortfolio(unittest.TestCase):
                 "match_id": "M1",
                 "home_team": "Arsenal",
                 "away_team": "Chelsea",
+                "selection": "1X",
+                "odds": 1.35,
+                "selected_odds": 1.35,
+                "model_probability": 0.88,
+                "value_edge": 8.2,
+                "score": 88.0,
+            }
+        ]
+
+        with self.assertRaises(ValueError):
+            build_market_portfolio(
+                bad_candidates
+            )
+
+    def test_missing_selection_is_rejected(self):
+        bad_candidates = [
+            {
+                "match_id": "M1",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "1X",
+                "odds": 1.35,
+                "selected_odds": 1.35,
                 "model_probability": 0.88,
                 "value_edge": 8.2,
                 "score": 88.0,
@@ -590,7 +613,7 @@ class TestMarketPortfolio(unittest.TestCase):
     # VALUE EDGE VALIDATION
     # ========================================================================
 
-    def test_negative_value_edge_is_rejected(self):
+    def test_negative_value_edge_is_clamped_to_zero(self):
         bad_candidates = [
             {
                 **self.candidates[0],
@@ -599,10 +622,14 @@ class TestMarketPortfolio(unittest.TestCase):
             *self.candidates[1:],
         ]
 
-        with self.assertRaises(ValueError):
-            build_market_portfolio(
-                bad_candidates
-            )
+        tickets = build_market_portfolio(
+            bad_candidates
+        )
+
+        for ticket in tickets:
+            for selection in ticket.selections:
+                if selection.match_id == self.candidates[0]["match_id"]:
+                    self.assertEqual(selection.value_edge, 0.0)
 
     # ========================================================================
     # PORTFOLIO IMMUTABILITY
