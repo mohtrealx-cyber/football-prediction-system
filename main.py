@@ -46,7 +46,7 @@ def main():
     print("=======================================================================")
 
     print("\n[1/5] Downloading latest fixtures...")
-    download_fixtures()
+    download_fixtures("data/fixtures.csv")
     fixtures = load_fixtures()
     print(f"Downloaded fixtures: {len(fixtures)}")
 
