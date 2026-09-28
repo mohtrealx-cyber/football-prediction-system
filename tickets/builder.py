@@ -7,7 +7,7 @@ class Selection:
     match_id: str
     match: str
     market: str
-    odds: float
+    selected_odds: float
     confidence: float
     value_edge: float
 
@@ -21,8 +21,8 @@ class Selection:
         if not isinstance(self.market, str) or not self.market.strip():
             raise ValueError("market cannot be empty")
 
-        if self.odds <= 1.0:
-            raise ValueError("odds must be greater than 1.0")
+        if self.selected_odds <= 1.0:
+            raise ValueError("selected_odds must be greater than 1.0")
 
         if not 0 <= self.confidence <= 100:
             raise ValueError(
@@ -46,7 +46,7 @@ class Ticket:
         result = 1.0
 
         for selection in self.selections:
-            result *= selection.odds
+            result *= selection.selected_odds
 
         return round(result, 4)
 
@@ -84,9 +84,9 @@ class TicketBuilder:
     Strategy:
 
         IRONCLAD   = 40%
-        BALANCED   = 20%
-        VOLATILITY = 10%
-        BENCHMARK  = 30%
+        BALANCED   = 30%
+        VOLATILITY = 20%
+        BENCHMARK  = 10%
 
     All tickets require at least three selections.
 
@@ -107,7 +107,7 @@ class TicketBuilder:
         ),
         (
             "BALANCED",
-            20.0,
+            30.0,
             "confidence",
             70.0,
             3,
@@ -115,7 +115,7 @@ class TicketBuilder:
         ),
         (
             "VOLATILITY",
-            10.0,
+            20.0,
             "value_edge",
             5.0,
             3,
@@ -123,7 +123,7 @@ class TicketBuilder:
         ),
         (
             "BENCHMARK",
-            30.0,
+            10.0,
             "confidence",
             65.0,
             3,
@@ -226,7 +226,7 @@ class TicketBuilder:
                     key=lambda selection: (
                         selection.confidence,
                         selection.value_edge,
-                        selection.odds,
+                        selection.selected_odds,
                     ),
                     reverse=True,
                 )
@@ -237,7 +237,7 @@ class TicketBuilder:
                     key=lambda selection: (
                         selection.value_edge,
                         selection.confidence,
-                        selection.odds,
+                        selection.selected_odds,
                     ),
                     reverse=True,
                 )
@@ -386,9 +386,9 @@ class TicketBuilder:
 
             expected_stakes = {
                 "IRONCLAD": 40.0,
-                "BALANCED": 20.0,
-                "VOLATILITY": 10.0,
-                "BENCHMARK": 30.0,
+                "BALANCED": 30.0,
+                "VOLATILITY": 20.0,
+                "BENCHMARK": 10.0,
             }
 
             actual_stakes = {
