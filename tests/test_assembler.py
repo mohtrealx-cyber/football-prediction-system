@@ -1,109 +1,87 @@
-import unittest
+from unittest import TestCase
 
-from tickets.assembler import build_four_tickets
+from tickets.builder import Selection, TicketBuilder
 
 
-class TicketAssemblerTests(unittest.TestCase):
+class TicketAssemblerTests(TestCase):
 
-    def setUp(self):
-        self.candidates = [
-            {
-                "match_id": "M1",
-                "home_team": "Arsenal",
-                "away_team": "Chelsea",
-                "market": "1X",
-                "odds": 1.35,
-                "model_probability": 0.88,
-                "value_edge": 8.2,
-            },
-            {
-                "match_id": "M2",
-                "home_team": "Barcelona",
-                "away_team": "Valencia",
-                "market": "Home Win",
-                "odds": 1.50,
-                "model_probability": 0.84,
-                "value_edge": 7.1,
-            },
-            {
-                "match_id": "M3",
-                "home_team": "Inter",
-                "away_team": "Torino",
-                "market": "DNB",
-                "odds": 1.40,
-                "model_probability": 0.82,
-                "value_edge": 5.8,
-            },
-            {
-                "match_id": "M4",
-                "home_team": "Milan",
-                "away_team": "Lazio",
-                "market": "Over 1.5",
-                "odds": 1.30,
-                "model_probability": 0.78,
-                "value_edge": 6.9,
-            },
-            {
-                "match_id": "M5",
-                "home_team": "Dortmund",
-                "away_team": "Mainz",
-                "market": "Home Win",
-                "odds": 1.60,
-                "model_probability": 0.74,
-                "value_edge": 9.4,
-            },
-            {
-                "match_id": "M6",
-                "home_team": "PSG",
-                "away_team": "Lille",
-                "market": "Over 1.5",
-                "odds": 1.28,
-                "model_probability": 0.69,
-                "value_edge": 4.2,
-            },
-            {
-                "match_id": "M7",
-                "home_team": "Porto",
-                "away_team": "Braga",
-                "market": "1X",
-                "odds": 1.37,
-                "model_probability": 0.65,
-                "value_edge": 7.8,
-            },
-            {
-                "match_id": "M8",
-                "home_team": "Ajax",
-                "away_team": "Utrecht",
-                "market": "Over 2.5",
-                "odds": 1.72,
-                "model_probability": 0.61,
-                "value_edge": 10.3,
-            },
+    def _make_selection(
+        self,
+        match_id,
+        confidence=90.0,
+        value_edge=10.0,
+        odds=1.50,
+    ):
+        return Selection(
+            match_id=match_id,
+            match=f"Home {match_id} vs Away {match_id}",
+            market="HOME",
+            odds=odds,
+            confidence=confidence,
+            value_edge=value_edge,
+        )
+
+    def _make_candidates(self, count=12):
+        return [
+            self._make_selection(
+                match_id=f"MATCH_{index}",
+                confidence=90.0 - index,
+                value_edge=10.0 - (index * 0.2),
+                odds=1.40 + (index * 0.05),
+            )
+            for index in range(count)
         ]
 
     def test_four_tickets_can_be_created(self):
-        tickets = build_four_tickets(self.candidates)
+        builder = TicketBuilder()
+
+        selections = self._make_candidates(12)
+
+        tickets = builder.build(selections)
+
+        names = [
+            ticket.name
+            for ticket in tickets
+        ]
 
         self.assertEqual(
-            [ticket.name for ticket in tickets],
+            names,
             [
-                "SAFE",
+                "IRONCLAD",
                 "BALANCED",
-                "AGGRESSIVE",
-                "VALUE",
+                "VOLATILITY",
+                "BENCHMARK",
             ],
         )
 
     def test_four_ticket_stakes_are_correct(self):
-        tickets = build_four_tickets(self.candidates)
+        builder = TicketBuilder()
+
+        selections = self._make_candidates(12)
+
+        tickets = builder.build(selections)
+
+        stakes = [
+            ticket.stake_percent
+            for ticket in tickets
+        ]
 
         self.assertEqual(
-            [ticket.stake_percent for ticket in tickets],
-            [40.0, 30.0, 20.0, 10.0],
+            stakes,
+            [
+                40.0,
+                20.0,
+                10.0,
+                30.0,
+            ],
         )
 
     def test_each_ticket_has_at_least_three_matches(self):
-        tickets = build_four_tickets(self.candidates)
+        builder = TicketBuilder()
+
+        selections = self._make_candidates(12)
+
+        tickets = builder.build(selections)
 
         for ticket in tickets:
             self.assertGreaterEqual(
@@ -112,50 +90,107 @@ class TicketAssemblerTests(unittest.TestCase):
             )
 
     def test_ticket_one_uses_strongest_selections(self):
-        tickets = build_four_tickets(self.candidates)
+        builder = TicketBuilder()
 
-        safe_ticket = tickets[0]
-
-        confidences = [
-            selection.confidence
-            for selection in safe_ticket.selections
+        selections = [
+            self._make_selection(
+                "STRONG_1",
+                confidence=98.0,
+                value_edge=15.0,
+            ),
+            self._make_selection(
+                "STRONG_2",
+                confidence=97.0,
+                value_edge=14.0,
+            ),
+            self._make_selection(
+                "STRONG_3",
+                confidence=96.0,
+                value_edge=13.0,
+            ),
+            self._make_selection(
+                "WEAKER_1",
+                confidence=82.0,
+                value_edge=7.0,
+            ),
+            self._make_selection(
+                "WEAKER_2",
+                confidence=81.0,
+                value_edge=6.0,
+            ),
+            self._make_selection(
+                "WEAKER_3",
+                confidence=80.0,
+                value_edge=5.0,
+            ),
         ]
 
-        self.assertTrue(
-            all(confidence >= 80.0 for confidence in confidences)
+        tickets = builder.build(selections)
+
+        ironclad = tickets[0]
+
+        selected_ids = {
+            selection.match_id
+            for selection in ironclad.selections
+        }
+
+        self.assertIn(
+            "STRONG_1",
+            selected_ids,
         )
 
-    def test_missing_candidate_field_is_rejected(self):
-        bad_candidates = [
-            {
-                "match_id": "M1",
-                "home_team": "Arsenal",
-                "away_team": "Chelsea",
-                "market": "1X",
-                "odds": 1.35,
-                "model_probability": 0.88,
-                # value_edge intentionally missing
-            }
-        ]
+        self.assertIn(
+            "STRONG_2",
+            selected_ids,
+        )
 
-        with self.assertRaises(ValueError):
-            build_four_tickets(bad_candidates)
+        self.assertIn(
+            "STRONG_3",
+            selected_ids,
+        )
 
     def test_tickets_use_candidate_matches(self):
-        tickets = build_four_tickets(self.candidates)
+        builder = TicketBuilder()
 
-        all_ticket_match_ids = []
+        selections = self._make_candidates(12)
+
+        tickets = builder.build(selections)
+
+        original_ids = {
+            selection.match_id
+            for selection in selections
+        }
 
         for ticket in tickets:
             for selection in ticket.selections:
-                all_ticket_match_ids.append(selection.match_id)
+                self.assertIn(
+                    selection.match_id,
+                    original_ids,
+                )
 
-        self.assertTrue(
-            set(all_ticket_match_ids).issubset(
-                {candidate["match_id"] for candidate in self.candidates}
-            )
+    def test_missing_candidate_field_is_rejected(self):
+        selection = self._make_selection(
+            "MATCH_1"
         )
+
+        builder = TicketBuilder()
+
+        selection_without_market = Selection(
+            match_id=selection.match_id,
+            match=selection.match,
+            market="",
+            odds=selection.odds,
+            confidence=selection.confidence,
+            value_edge=selection.value_edge,
+        )
+
+        with self.assertRaises(ValueError):
+            builder.build(
+                [selection_without_market]
+            )
 
 
 if __name__ == "__main__":
+    import unittest
+
     unittest.main()
