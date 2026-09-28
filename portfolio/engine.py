@@ -486,7 +486,7 @@ def _candidate_to_selection(candidate: dict) -> Selection:
         match_id=match_id,
         match=match,
         market=market,
-        odds=odds,
+        selected_odds=odds,
         confidence=confidence,
         value_edge=value_edge,
     )
