@@ -52,6 +52,9 @@ class TestEndToEnd(unittest.TestCase):
                 candidate["away_team"] = (
                     f"Away Team {index + 1}"
                 )
+                # Ensure new strict validator fields are present
+                candidate["selection"] = candidate["market"]
+                candidate["selected_odds"] = candidate["odds"]
 
             candidates.extend(match_candidates)
 
