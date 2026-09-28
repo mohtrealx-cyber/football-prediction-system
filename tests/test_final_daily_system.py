@@ -1,3 +1,4 @@
+```python
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -72,9 +73,11 @@ class FinalDailySystemTests(unittest.TestCase):
 
         history = []
 
-        for index, ((home_team, away_team), (home_goals, away_goals)) in enumerate(
-            zip(historical_pairs, results)
-        ):
+        for index, (
+            (home_team, away_team),
+            (home_goals, away_goals),
+        ) in enumerate(zip(historical_pairs, results)):
+
             history.append(
                 HistoricalMatch(
                     match_id=f"h{index + 1}",
@@ -109,6 +112,7 @@ class FinalDailySystemTests(unittest.TestCase):
         fixtures = []
 
         for index, (home_team, away_team) in enumerate(fixture_pairs):
+
             odds = {
                 market: 10.0
                 for market in MARKETS
@@ -136,12 +140,9 @@ class FinalDailySystemTests(unittest.TestCase):
         return fixtures
 
     def test_complete_daily_system_returns_report(self):
-        fixtures = self._fixtures()
-        history = self._history()
-
         result = build_daily_report_output(
-            fixtures,
-            history,
+            self._fixtures(),
+            self._history(),
             self.as_of,
         )
 
@@ -180,10 +181,8 @@ class FinalDailySystemTests(unittest.TestCase):
         )
 
     def test_daily_metadata_is_correct(self):
-        fixtures = self._fixtures()
-
         result = build_daily_report_output(
-            fixtures,
+            self._fixtures(),
             self._history(),
             self.as_of,
         )
@@ -230,10 +229,10 @@ class FinalDailySystemTests(unittest.TestCase):
         self.assertEqual(
             ticket_names,
             {
-                "SAFE",
+                "IRONCLAD",
                 "BALANCED",
-                "AGGRESSIVE",
-                "VALUE",
+                "VOLATILITY",
+                "BENCHMARK",
             },
         )
 
@@ -252,17 +251,75 @@ class FinalDailySystemTests(unittest.TestCase):
         portfolio = result["portfolio"]
 
         expected_stakes = {
-            "SAFE": 40.0,
+            "IRONCLAD": 40.0,
             "BALANCED": 30.0,
-            "AGGRESSIVE": 20.0,
-            "VALUE": 10.0,
+            "VOLATILITY": 20.0,
+            "BENCHMARK": 10.0,
         }
 
         for ticket in portfolio:
+            self.assertIn(
+                ticket["name"],
+                expected_stakes,
+            )
+
             self.assertEqual(
                 ticket["stake_percent"],
                 expected_stakes[ticket["name"]],
             )
+
+    def test_ticket_stakes_sum_to_one_hundred(self):
+        result = build_daily_report_output(
+            self._fixtures(),
+            self._history(),
+            self.as_of,
+        )
+
+        if result["status"] == "NO_BET":
+            self.skipTest(
+                "No qualifying portfolio was produced."
+            )
+
+        portfolio = result["portfolio"]
+
+        total_stake = sum(
+            ticket["stake_percent"]
+            for ticket in portfolio
+        )
+
+        self.assertEqual(
+            total_stake,
+            100.0,
+        )
+
+    def test_expected_ticket_order(self):
+        result = build_daily_report_output(
+            self._fixtures(),
+            self._history(),
+            self.as_of,
+        )
+
+        if result["status"] == "NO_BET":
+            self.skipTest(
+                "No qualifying portfolio was produced."
+            )
+
+        portfolio = result["portfolio"]
+
+        ticket_names = [
+            ticket["name"]
+            for ticket in portfolio
+        ]
+
+        self.assertEqual(
+            ticket_names,
+            [
+                "IRONCLAD",
+                "BALANCED",
+                "VOLATILITY",
+                "BENCHMARK",
+            ],
+        )
 
     def test_empty_inputs_produce_no_bet(self):
         result = build_daily_report_output(
@@ -362,3 +419,4 @@ class FinalDailySystemTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+```
