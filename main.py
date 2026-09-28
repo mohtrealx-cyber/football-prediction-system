@@ -47,7 +47,7 @@ def main():
 
     print("\n[1/5] Downloading latest fixtures...")
     download_fixtures("data/fixtures.csv")
-    fixtures = load_fixtures()
+    fixtures = load_fixtures("data/fixtures.csv")
     print(f"Downloaded fixtures: {len(fixtures)}")
 
     as_of = datetime.now(timezone.utc)
