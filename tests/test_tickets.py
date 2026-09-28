@@ -10,13 +10,13 @@ class TicketBuilderTests(TestCase):
         match_id,
         confidence=90.0,
         value_edge=10.0,
-        odds=1.50,
+        selected_odds=1.50,
     ):
         return Selection(
             match_id=match_id,
             match=f"Home {match_id} vs Away {match_id}",
             market="HOME",
-            odds=odds,
+            selected_odds=selected_odds,
             confidence=confidence,
             value_edge=value_edge,
         )
@@ -27,7 +27,7 @@ class TicketBuilderTests(TestCase):
                 f"MATCH_{i}",
                 confidence=95.0 - i,
                 value_edge=15.0 - (i * 0.25),
-                odds=1.40 + (i * 0.03),
+                selected_odds=1.40 + (i * 0.03),
             )
             for i in range(count)
         ]
@@ -49,7 +49,7 @@ class TicketBuilderTests(TestCase):
             ],
         )
 
-    def test_stakes_are_40_20_10_30(self):
+    def test_stakes_are_40_30_20_10(self):
         builder = TicketBuilder()
 
         tickets = builder.build(
@@ -63,9 +63,9 @@ class TicketBuilderTests(TestCase):
             ],
             [
                 40.0,
+                30.0,
                 20.0,
                 10.0,
-                30.0,
             ],
         )
 
