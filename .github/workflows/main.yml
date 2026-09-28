@@ -2,8 +2,8 @@ name: Run Football Prediction System
 
 on:
   schedule:
-    - cron: '0 6 * * *' # Runs daily at 06:00 UTC (adjust as needed)
-  workflow_dispatch: # Allows manual runs from the Actions tab
+    - cron: '0 6 * * *' # Runs daily at 06:00 UTC
+  workflow_dispatch: # Allows manual execution from the GitHub Actions tab
 
 jobs:
   run-system:
@@ -26,7 +26,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Keep any other existing API keys your workflow needs here:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           SCRAMBLE_API_KEY: ${{ secrets.SCRAMBLE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python main.py
