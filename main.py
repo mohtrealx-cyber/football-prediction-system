@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timezone
 from data.fixture_downloader import download_fixtures
 from data.fixture_loader import load_fixtures
-from data.historical_loader import load_all_historical_data
+from data.historical_loader import load_historical_matches
 from pipeline.daily_report_output import build_daily_report_output
 
 # ==============================================================================
@@ -54,7 +54,28 @@ def main():
     print(f"\nCurrent time: {as_of.isoformat()}")
 
     print("\n[2/5] Loading historical data...")
-    history = load_all_historical_data()
+    LEAGUES_TO_LOAD = [
+        ("data/historical/premier_league.csv", "Premier League"),
+        ("data/historical/bundesliga.csv", "Bundesliga"),
+        ("data/historical/la_liga.csv", "La Liga"),
+        ("data/historical/serie_a.csv", "Serie A"),
+        ("data/historical/ligue_1.csv", "Ligue 1"),
+        ("data/historical/eredivisie.csv", "Eredivisie"),
+        ("data/historical/primeira_liga.csv", "Primeira Liga"),
+        ("data/historical/champions_league.csv", "UEFA Champions League"),
+        ("data/historical/europa_league.csv", "UEFA Europa League"),
+        ("data/historical/conference_league.csv", "UEFA Conference League"),
+    ]
+
+    history = []
+    for csv_path, league_name in LEAGUES_TO_LOAD:
+        try:
+            matches = load_historical_matches(csv_path, league_name)
+            history.extend(matches)
+            print(f"  Loaded {len(matches)} matches: {league_name}")
+        except Exception as e:
+            print(f"  Skipped {league_name}: {e}")
+
     print(f"\nTotal historical matches loaded: {len(history)}")
 
     print("\n[3/5] Running complete prediction pipeline...")
